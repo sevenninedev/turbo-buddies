@@ -200,9 +200,10 @@
   }
 
   function resetRun() {
-    const p1 = makePlayer(1, chosen.p1, mode === 2 ? -40 : 0);
+    const yOff1 = campaign === "house" ? 0 : (mode === 2 ? -40 : 0);
+    const p1 = makePlayer(1, chosen.p1, yOff1);
     world.players = [p1];
-    if (mode === 2) world.players.push(makePlayer(2, chosen.p2, 50));
+    if (mode === 2) world.players.push(makePlayer(2, chosen.p2, campaign === "house" ? 0 : 50));
     placePlayers();
     world.time = 0;
     world.dist = 0;
@@ -212,6 +213,7 @@
     world.particles = [];
     world.popups = [];
     world.tickles = [];
+    world.platforms = [];
     world.spawnT = 1.1;
     world.tickleT = 5.2;
     world.shake = 0;
@@ -220,6 +222,7 @@
     world.doorOpen = 0;
     world.flashT = 3.8;
     world.flashAge = 0;
+    world.fade = 0;
     pointers.clear();
     keysDown.clear();
     seedClouds();
@@ -249,14 +252,16 @@
     elHudP2.hidden = mode !== 2;
     elHint.classList.toggle("twop", mode === 2);
     if (mode === 2) {
-      elHint.innerHTML = '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
+      elHint.innerHTML = campaign === "house"
+        ? '<span class="h1">P1: tap left to jump</span><span class="h2">P2: tap right to jump</span>'
+        : '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
     } else {
-      elHint.textContent = campaign === "house" ? "HOLD TO FLY! Stomp baddies on the head!" : "HOLD TO FLY!";
+      elHint.textContent = campaign === "house" ? "TAP TO JUMP! Stomp baddies on the head!" : "HOLD TO FLY!";
     }
     updateHud();
     if (campaign === "house" && !skipNextIntro) {
-      state = "intro";
-      setupIntroWalk();
+      state = "yard";
+      setupYard();
       elHud.hidden = true;
       elHint.hidden = true;
     } else {
@@ -271,27 +276,79 @@
     elHint.hidden = false;
     if (campaign === "house") {
       placePlayers();
-      world.spawnT = 0.7;
-      world.flashT = 3.2;
+      for (const p of world.players) standOnFloor(p);
+      world.spawnT = 0.8;
+      if (!world.platforms.length) {
+        const fy = houseFloorTop();
+        world.platforms.push(makeHousePlatform("sofa", W * 0.58, fy - 44));
+      }
     }
     updateHud();
   }
 
   function houseGroundY() { return H * 0.70; }
+  function houseFloorTop() { return H * 0.78; }
 
-  function setupIntroWalk() {
+  function houseRect() {
     const gy = houseGroundY();
-    const startY = H - 64;
+    const hw = Math.min(W * 0.9, 370);
+    const hh = H * 0.46;
+    const hx = (W - hw) / 2;
+    return { x: hx - 22, y: gy - hh, w: hw + 44, h: hh + 12 };
+  }
+
+  function tapHitsHouse(px, py) {
+    const r = houseRect();
+    return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+  }
+
+  function standOnFloor(p, surfaceY) {
+    const { drawH } = playerSize(p);
+    const top = surfaceY == null ? houseFloorTop() : surfaceY;
+    p.y = top - drawH * 0.48;
+    p.vy = 0;
+    p.onGround = true;
+    p.coyote = 0.14;
+  }
+
+  function setupYard() {
+    const gy = houseGroundY();
     world.players.forEach((p, i) => {
       const { drawH } = playerSize(p);
-      p.x = W * 0.5 + (mode === 2 ? (i === 0 ? -36 : 36) : 0);
-      p.y = startY - drawH * 0.38;
+      p.x = W * 0.5 + (mode === 2 ? (i === 0 ? -40 : 40) : 0);
+      // stand on the path in front of the house, feet on the ground
+      p.y = H * 0.86 - drawH * 0.38;
       p.vy = 0;
-      p._walkFrom = p.y;
-      p._walkTo = gy - drawH * 0.42;
+      p.boosting = false;
     });
     world.introT = 0;
     world.doorOpen = 0;
+    world.fade = 0;
+  }
+
+  function startEnterHouse() {
+    if (state !== "yard") return;
+    sfxStart();
+    world.players.forEach((p, i) => {
+      const { drawH } = playerSize(p);
+      p._walkFromX = p.x;
+      p._walkFromY = p.y;
+      p._walkToX = W * 0.5 + (mode === 2 ? (i === 0 ? -18 : 18) : 0);
+      p._walkToY = gyFeet(p);
+      p.vy = 0;
+    });
+    state = "intro";
+    world.introT = 0;
+  }
+
+  function gyFeet(p) {
+    const gy = houseGroundY();
+    const { drawH } = playerSize(p);
+    return gy - drawH * 0.42;
+  }
+
+  function setupIntroWalk() {
+    setupYard();
   }
 
   function livingPlayers() {
@@ -426,28 +483,64 @@
     };
   }
 
+  function makeHousePlatform(kind, x, y) {
+    const floor = houseFloorTop();
+    let w = 100, h = 40, top = y;
+    if (kind === "sofa") { w = 118; h = 46; top = top != null ? top : floor - h; }
+    else if (kind === "table") { w = 86; h = 38; top = top != null ? top : floor - h; }
+    else { kind = "shelf"; w = 96; h = 16; top = top != null ? top : floor - rand(100, 155); }
+    return { kind, x, y: top, w, h };
+  }
+
   function spawnHouseWave() {
     const kinds = ["ghostSmall", "ghostSmall", "ghostBig", "eye"];
     const kind = kinds[(Math.random() * kinds.length) | 0];
-    const margin = 80;
-    const y = rand(margin, H - margin);
-    world.obstacles.push(makeHouseEnemy(kind, W + 80, y));
-    const sy = clamp(y + rand(-170, 170), margin, H - margin);
-    world.stars.push({ x: W + 110, y: sy, r: 18, rot: rand(0, 6), candy: true });
+    const floor = houseFloorTop();
+    const r = kind === "eye" ? 50 : kind === "ghostBig" ? 46 : 34;
+    const onFloor = Math.random() < 0.6;
+    const y = onFloor ? floor - r * 0.85 : floor - rand(90, 150);
+    const en = makeHouseEnemy(kind, W + 90, y);
+    en.float = !onFloor;
+    en.baseY = y;
+    en.walk = onFloor ? rand(12, 36) : 0;
+    world.obstacles.push(en);
+    const candy = Math.random() < 0.55;
+    world.stars.push({
+      x: W + rand(120, 200),
+      y: floor - rand(36, 160),
+      r: candy ? 18 : 16,
+      rot: rand(0, 6),
+      candy,
+    });
+    if (Math.random() < 0.55) {
+      const kindsP = ["sofa", "table", "shelf"];
+      const pk = kindsP[(Math.random() * kindsP.length) | 0];
+      world.platforms.push(makeHousePlatform(pk, W + rand(150, 280), null));
+    }
+  }
+
+  function updateYard(dt) {
+    // idle: heroes stand on the path and wait for a tap on the house
+    for (const p of world.players) {
+      p.vy = 0;
+      p.boosting = false;
+    }
   }
 
   function updateIntro(dt) {
     world.introT += dt;
     const t = world.introT;
-    const walk = clamp((t - 0.2) / 2.4, 0, 1);
+    world.doorOpen = clamp(t / 0.4, 0, 1);
+    const walk = clamp((t - 0.15) / 1.25, 0, 1);
     const u = walk * walk * (3 - 2 * walk);
     for (const p of world.players) {
-      if (p._walkFrom != null) p.y = p._walkFrom + (p._walkTo - p._walkFrom) * u;
+      if (p._walkFromX != null) p.x = p._walkFromX + (p._walkToX - p._walkFromX) * u;
+      if (p._walkFromY != null) p.y = p._walkFromY + (p._walkToY - p._walkFromY) * u;
       p.vy = 0;
       p.boosting = false;
     }
-    if (t > 2.05) world.doorOpen = clamp((t - 2.05) / 0.45, 0, 1);
-    if (t > 3.15) beginPlay();
+    if (t > 1.45) world.fade = clamp((t - 1.45) / 0.28, 0, 1);
+    if (t > 1.75) beginPlay();
   }
 
   function fireFlashlight() {
@@ -493,12 +586,21 @@
 
   function update(dt) {
     world.time += dt;
+    if (state === "yard") {
+      updateYard(dt);
+      return;
+    }
     if (state === "intro") {
       updateIntro(dt);
       return;
     }
     if (state !== "play") {
       scrollDecor(dt, 40);
+      return;
+    }
+
+    if (campaign === "house") {
+      updateHousePlay(dt);
       return;
     }
 
@@ -630,6 +732,145 @@
       pop.y -= 50 * dt;
     }
     world.popups = world.popups.filter((p) => p.t < 0.7);
+  }
+
+  function requestJump(slot) {
+    const p = world.players[slot - 1];
+    if (!p || p.ghost) return;
+    p.jumpBuf = 0.14;
+    tryJump(p);
+  }
+
+  function tryJump(p) {
+    if (!p || p.ghost) return false;
+    if (!(p.jumpBuf > 0) || !(p.coyote > 0)) return false;
+    p.vy = -720;
+    p.coyote = 0;
+    p.jumpBuf = 0;
+    p.onGround = false;
+    sfxBoost();
+    return true;
+  }
+
+  function updateHousePlay(dt) {
+    world.speed = 150 + Math.min(160, world.dist / 40);
+    const sp = world.speed * dt;
+    world.dist += sp;
+    const GRAVITY = 1850;
+    const floor = houseFloorTop();
+
+    for (const p of world.players) {
+      p.vy += GRAVITY * dt;
+      p.vy = clamp(p.vy, -900, 980);
+      p.y += p.vy * dt;
+      p.onGround = false;
+      const { drawW, drawH } = playerSize(p);
+      const feet = p.y + drawH * 0.48;
+      const half = drawW * 0.28;
+      if (p.vy >= 0 && feet >= floor) {
+        p.y = floor - drawH * 0.48;
+        p.vy = 0;
+        p.onGround = true;
+      }
+      for (const pl of world.platforms) {
+        if (p.vy < 0) continue;
+        if (p.x + half < pl.x + 8 || p.x - half > pl.x + pl.w - 8) continue;
+        const top = pl.y;
+        const feetNow = p.y + drawH * 0.48;
+        if (feetNow >= top && feetNow <= top + 24) {
+          p.y = top - drawH * 0.48;
+          p.vy = 0;
+          p.onGround = true;
+        }
+      }
+      if (p.onGround) p.coyote = 0.14;
+      else p.coyote = Math.max(0, (p.coyote || 0) - dt);
+      if (p.jumpBuf > 0) {
+        p.jumpBuf -= dt;
+        tryJump(p);
+      }
+      if (p.y < 80) { p.y = 80; if (p.vy < 0) p.vy = 0; }
+      if (p.invuln > 0) p.invuln -= dt;
+      if (p.giggle > 0) p.giggle -= dt;
+    }
+    placePlayers();
+
+    if (world.shake > 0) world.shake = Math.max(0, world.shake - 28 * dt);
+    if (world.hintT > 0) {
+      world.hintT -= dt;
+      if (world.hintT <= 0) elHint.hidden = true;
+    }
+    if (world.fade > 0) world.fade = Math.max(0, world.fade - dt * 2.8);
+
+    world.spawnT -= dt;
+    const interval = Math.max(1.15, 1.9 - world.dist / 7000);
+    if (world.spawnT <= 0) {
+      spawnHouseWave();
+      world.spawnT = interval;
+    }
+
+    for (const o of world.obstacles) {
+      o.x -= sp + (o.walk || 0) * dt;
+      if (o.float && o.baseY != null) o.y = o.baseY + Math.sin(world.time * 2.2 + (o.bob || 0)) * 14;
+      if (o.flash > 0) o.flash -= dt;
+    }
+    for (const s of world.stars) s.x -= sp;
+    for (const pl of world.platforms) pl.x -= sp;
+
+    for (const o of world.obstacles) {
+      if (o.x < -80 || o.dead) continue;
+      let anyonePassed = false;
+      for (const p of world.players) {
+        const { drawW, drawH } = playerSize(p);
+        const hbW = drawW * 0.36, hbH = drawH * 0.38;
+        const hbY = p.y + drawH * 0.06, hbX = p.x;
+        if (!o.passed && o.x + o.r < hbX - 40) anyonePassed = true;
+        if (p.ghost) continue;
+        if (isHouseBaddie(o) && isStomp(p, o, drawW, drawH)) {
+          stompEnemy(p, o);
+          continue;
+        }
+        const or = o.r * 0.78;
+        if (ellipseHit(hbX, hbY, hbW, hbH, o.x, o.y, or, or)) hitPlayer(p);
+      }
+      if (anyonePassed && !o.passed && !o.dead) {
+        o.passed = true;
+        for (const p of livingPlayers()) addScore(p, 1, o.x, o.y);
+      }
+    }
+    world.obstacles = world.obstacles.filter((o) => o.x > -120 && !o.dead);
+    world.platforms = world.platforms.filter((pl) => pl.x + pl.w > -50);
+
+    for (const s of world.stars) {
+      if (s.got) continue;
+      s.rot += dt * 2;
+      for (const p of world.players) {
+        if (p.ghost || s.got) continue;
+        const { drawH } = playerSize(p);
+        const hbY = p.y + drawH * 0.06, hbX = p.x;
+        const dx = s.x - hbX, dy = s.y - hbY;
+        if (dx * dx + dy * dy < (s.r + 28) * (s.r + 28)) {
+          s.got = true;
+          addScore(p, 10, s.x, s.y);
+          sfxCollect();
+          burst(s.x, s.y);
+        }
+      }
+    }
+    world.stars = world.stars.filter((s) => s.x > -60 && !s.got);
+
+    for (const part of world.particles) {
+      part.x += part.vx * dt;
+      part.y += part.vy * dt;
+      part.vy += 40 * dt;
+      part.t += dt;
+    }
+    world.particles = world.particles.filter((pt) => pt.t < pt.life);
+    for (const pop of world.popups) {
+      pop.t += dt;
+      pop.y -= 50 * dt;
+    }
+    world.popups = world.popups.filter((pop) => pop.t < 0.7);
   }
 
   function spawnTickle(x, y) {
@@ -813,7 +1054,7 @@
     ctx.save();
     ctx.translate(sx, sy);
 
-    if (state === "intro") {
+    if (state === "yard" || state === "intro") {
       drawHouseOutside();
     } else if (campaign === "house") {
       drawHouseInside();
@@ -850,12 +1091,15 @@
       ctx.restore();
     }
 
-    if (state === "intro") {
+    if (state === "yard" || state === "intro") {
       for (const p of world.players) drawPlayer(p);
+      if (state === "yard") drawTapHouseHint();
     }
 
     if (state === "play" || state === "over") {
-      if (campaign === "house" && world.flashAge > 0) drawFlashlight();
+      if (campaign === "house") {
+        for (const pl of world.platforms) drawHousePlatform(pl);
+      }
       for (const o of world.obstacles) drawObstacle(o);
       for (const s of world.stars) if (!s.got) drawStar(s);
       for (const part of world.particles) drawParticle(part);
@@ -875,6 +1119,51 @@
       }
     }
 
+    if (world.fade > 0) {
+      ctx.save();
+      ctx.globalAlpha = world.fade;
+      ctx.fillStyle = "#fff6d0";
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  function drawTapHouseHint() {
+    const bounce = Math.sin(world.time * 4.2) * 10;
+    const r = houseRect();
+    const x = W / 2;
+    const y = Math.max(86, r.y - 28) + bounce;
+    ctx.save();
+    ctx.translate(x, y);
+    const label = "Tap the house!";
+    ctx.font = "800 34px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const tw = Math.min(W - 28, Math.max(240, ctx.measureText(label).width + 44));
+    const th = 58;
+    ctx.fillStyle = "rgba(255, 230, 80, 0.96)";
+    ctx.strokeStyle = "#3a2100";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-tw / 2, -th / 2, tw, th, 18);
+    else ctx.rect(-tw / 2, -th / 2, tw, th);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#3a2100";
+    ctx.fillText(label, 0, 1);
+    // arrow pointing down at the house
+    ctx.fillStyle = "#ffb347";
+    ctx.strokeStyle = "#3a2100";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-18, th / 2 + 6);
+    ctx.lineTo(18, th / 2 + 6);
+    ctx.lineTo(0, th / 2 + 28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1105,7 +1394,7 @@
   }
 
   function drawHouseInside() {
-    // bright, friendly room
+    const fy = houseFloorTop();
     const g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, "#fff8e0");
     g.addColorStop(0.65, "#ffe9c4");
@@ -1116,34 +1405,13 @@
     ctx.save();
     ctx.globalAlpha = 0.16;
     ctx.fillStyle = "#ff9ec8";
-    for (let y = 16; y < H * 0.76; y += 30) ctx.fillRect(-20, y, W + 40, 11);
+    for (let y = 16; y < fy - 8; y += 30) ctx.fillRect(-20, y, W + 40, 11);
     ctx.restore();
-    // wood floor
-    const fy = H * 0.78;
-    const fg = ctx.createLinearGradient(0, fy, 0, H);
-    fg.addColorStop(0, "#e8b56a");
-    fg.addColorStop(1, "#c8883c");
-    ctx.fillStyle = fg;
-    ctx.fillRect(-20, fy, W + 40, H - fy + 20);
-    ctx.strokeStyle = "rgba(120, 70, 20, 0.35)";
-    ctx.lineWidth = 2;
-    for (let y = fy; y < H + 8; y += 18) {
-      ctx.beginPath();
-      ctx.moveTo(-20, y);
-      ctx.lineTo(W + 20, y);
-      ctx.stroke();
-    }
-    for (let x = 0; x < W + 20; x += 52) {
-      ctx.beginPath();
-      ctx.moveTo(x, fy);
-      ctx.lineTo(x, H + 20);
-      ctx.stroke();
-    }
-    // baseboard
-    ctx.fillStyle = "#a86a30";
-    ctx.fillRect(-20, fy - 10, W + 40, 10);
-    // daytime windows + curtains
+    // scrolling windows and frames so it feels like running through rooms
+    const period = 260;
+    const off = -((world.dist * 0.85) % period);
     function dayWin(x, y, ww, hh) {
+      if (x + ww < -20 || x > W + 20) return;
       ctx.fillStyle = "#fff";
       ctx.fillRect(x - 7, y - 7, ww + 14, hh + 14);
       const wg = ctx.createLinearGradient(x, y, x, y + hh);
@@ -1164,74 +1432,79 @@
       ctx.fillRect(x, y, 11, hh);
       ctx.fillRect(x + ww - 11, y, 11, hh);
     }
-    dayWin(22, 100, 74, 86);
-    dayWin(W - 96, 150, 74, 86);
-    dayWin(W / 2 - 42, 64, 84, 58);
-    // picture frames
     function frame(x, y, fw, fh, bg) {
+      if (x + fw < -10 || x > W + 10) return;
       ctx.fillStyle = "#d4a84a";
       ctx.fillRect(x - 5, y - 5, fw + 10, fh + 10);
       ctx.fillStyle = bg;
       ctx.fillRect(x, y, fw, fh);
     }
-    frame(W / 2 - 100, 150, 40, 34, "#b8e8ff");
-    ctx.fillStyle = "#ffe14a";
-    ctx.beginPath();
-    ctx.arc(W / 2 - 80, 164, 8, 0, Math.PI * 2);
-    ctx.fill();
-    frame(W / 2 + 60, 200, 36, 40, "#c8f5c0");
-    ctx.fillStyle = "#ff6b9a";
-    ctx.beginPath();
-    ctx.arc(W / 2 + 78, 218, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#5ec84a";
-    ctx.fillRect(W / 2 + 74, 224, 8, 10);
-    // sofa on the left
-    ctx.fillStyle = "#ff7a6e";
-    ctx.fillRect(10, fy - 52, 92, 44);
-    ctx.fillRect(10, fy - 70, 18, 22);
-    ctx.fillRect(84, fy - 70, 18, 22);
-    ctx.fillStyle = "#ff9a90";
-    ctx.fillRect(28, fy - 64, 56, 16);
-    // plant
-    ctx.fillStyle = "#c06a38";
-    ctx.fillRect(W - 42, fy - 22, 22, 18);
-    ctx.fillStyle = "#3daa3a";
-    ctx.beginPath();
-    ctx.ellipse(W - 31, fy - 40, 16, 22, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(W - 42, fy - 34, 10, 16, -0.4, 0, Math.PI * 2);
-    ctx.fill();
-    // little table
-    ctx.fillStyle = "#c8883c";
-    ctx.fillRect(W / 2 - 36, fy - 28, 72, 10);
-    ctx.fillRect(W / 2 - 30, fy - 18, 8, 18);
-    ctx.fillRect(W / 2 + 22, fy - 18, 8, 18);
-    ctx.fillStyle = "#ffd24a";
-    ctx.beginPath();
-    ctx.arc(W / 2, fy - 38, 8, 0, Math.PI * 2);
-    ctx.fill();
-    // floor lamp
-    ctx.fillStyle = "#8a6a40";
-    ctx.fillRect(W - 118, fy - 90, 6, 90);
-    ctx.fillStyle = "#ffe566";
-    ctx.beginPath();
-    ctx.moveTo(W - 132, fy - 88);
-    ctx.lineTo(W - 98, fy - 88);
-    ctx.lineTo(W - 106, fy - 118);
-    ctx.lineTo(W - 124, fy - 118);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "rgba(255, 230, 120, 0.22)";
-    ctx.beginPath();
-    ctx.arc(W - 115, fy - 70, 36, 0, Math.PI * 2);
-    ctx.fill();
-    // rug
-    ctx.fillStyle = "rgba(90, 170, 230, 0.45)";
-    ctx.beginPath();
-    ctx.ellipse(W / 2, fy + 36, 90, 22, 0, 0, Math.PI * 2);
-    ctx.fill();
+    for (let i = -1; i < 6; i++) {
+      const bx = off + i * period;
+      dayWin(bx + 24, 108, 74, 80);
+      dayWin(bx + 150, 70, 70, 54);
+      frame(bx + 110, 200, 40, 34, "#b8e8ff");
+      ctx.fillStyle = "#ffe14a";
+      ctx.beginPath();
+      ctx.arc(bx + 130, 214, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // wood floor (planks scroll a little)
+    const fg = ctx.createLinearGradient(0, fy, 0, H);
+    fg.addColorStop(0, "#e8b56a");
+    fg.addColorStop(1, "#c8883c");
+    ctx.fillStyle = fg;
+    ctx.fillRect(-20, fy, W + 40, H - fy + 20);
+    ctx.strokeStyle = "rgba(120, 70, 20, 0.35)";
+    ctx.lineWidth = 2;
+    for (let y = fy; y < H + 8; y += 18) {
+      ctx.beginPath();
+      ctx.moveTo(-20, y);
+      ctx.lineTo(W + 20, y);
+      ctx.stroke();
+    }
+    const plankOff = -((world.dist) % 52);
+    for (let x = plankOff - 52; x < W + 40; x += 52) {
+      ctx.beginPath();
+      ctx.moveTo(x, fy);
+      ctx.lineTo(x, H + 20);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#a86a30";
+    ctx.fillRect(-20, fy - 10, W + 40, 10);
+  }
+
+  function drawHousePlatform(pl) {
+    const x = pl.x, y = pl.y, w = pl.w, h = pl.h;
+    if (x + w < -10 || x > W + 10) return;
+    if (pl.kind === "sofa") {
+      ctx.fillStyle = "#ff7a6e";
+      ctx.fillRect(x, y + 16, w, h - 16);
+      ctx.fillRect(x, y, 16, h);
+      ctx.fillRect(x + w - 16, y, 16, h);
+      ctx.fillStyle = "#ff9a90";
+      ctx.fillRect(x + 18, y + 6, w - 36, 16);
+    } else if (pl.kind === "table") {
+      ctx.fillStyle = "#c8883c";
+      ctx.fillRect(x, y, w, 12);
+      ctx.fillRect(x + 8, y + 12, 10, h - 12);
+      ctx.fillRect(x + w - 18, y + 12, 10, h - 12);
+      ctx.fillStyle = "#ffd24a";
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y - 8, 7, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#d4a05a";
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = "#f0c878";
+      ctx.fillRect(x, y, w, 5);
+      ctx.fillStyle = "#6db6ff";
+      ctx.fillRect(x + 8, y - 18, 14, 18);
+      ctx.fillStyle = "#ff7aa0";
+      ctx.fillRect(x + 26, y - 22, 14, 22);
+      ctx.fillStyle = "#8ee08a";
+      ctx.fillRect(x + 44, y - 16, 14, 16);
+    }
   }
 
   function drawFlashlight() {
@@ -1658,7 +1931,16 @@
 
   window.addEventListener("pointerdown", (e) => {
     ensureAudio();
-    if (state === "play" && !isUiTarget(e.target)) {
+    if (isUiTarget(e.target)) return;
+    if (state === "yard") {
+      if (tapHitsHouse(e.clientX, e.clientY)) startEnterHouse();
+      return;
+    }
+    if (state === "play" && campaign === "house") {
+      requestJump(playerForPointerX(e.clientX));
+      return;
+    }
+    if (state === "play") {
       pointers.set(e.pointerId, playerForPointerX(e.clientX));
       syncBoosts();
     }
@@ -1684,6 +1966,16 @@
     if (e.repeat) return;
     if (isP1Key(e.code) || isP2Key(e.code)) {
       ensureAudio();
+      if (state === "yard") {
+        startEnterHouse();
+        return;
+      }
+      if (state === "play" && campaign === "house") {
+        if (mode === 1) requestJump(1);
+        else if (isP1Key(e.code)) requestJump(1);
+        else requestJump(2);
+        return;
+      }
       keysDown.add(e.code);
       syncBoosts();
     }
@@ -1704,7 +1996,7 @@
   document.getElementById("again").addEventListener("click", (e) => {
     e.preventDefault();
     ensureAudio();
-    skipNextIntro = true;
+    skipNextIntro = campaign !== "house";
     startGame();
   });
   document.getElementById("change").addEventListener("click", (e) => {
@@ -1902,9 +2194,29 @@
         chosen.p2 = null;
         skipNextIntro = true;
         startGame();
-        world.obstacles.push(makeHouseEnemy("eye", W * 0.62, H * 0.46));
-        world.obstacles.push(makeHouseEnemy("ghostBig", W * 0.72, H * 0.70));
-        world.stars.push({ x: W * 0.55, y: H * 0.28, r: 18, rot: 0.4, candy: true });
+        const fy = houseFloorTop();
+        if (world.players[0]) world.players[0].invuln = 0;
+        const eye = makeHouseEnemy("eye", W * 0.62, fy - 50 * 0.85);
+        eye.baseY = eye.y;
+        const ghost = makeHouseEnemy("ghostBig", W * 0.84, fy - 155);
+        ghost.float = true;
+        ghost.baseY = ghost.y;
+        world.obstacles.push(eye, ghost);
+        world.stars.push({ x: W * 0.50, y: fy - 130, r: 16, rot: 0.3, candy: false });
+        world.stars.push({ x: W * 0.36, y: fy - 44, r: 18, rot: 0.4, candy: true });
+        world.platforms = [
+          makeHousePlatform("sofa", W * 0.36, fy - 46),
+          makeHousePlatform("table", W * 0.72, fy - 38),
+          makeHousePlatform("shelf", W * 0.78, fy - 150),
+        ];
+      },
+      startHouseYard: (id) => {
+        campaign = "house";
+        mode = 1;
+        chosen.p1 = HOUSE_CHARS.find((x) => x.id === id) || HOUSE_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = false;
+        startGame();
       },
       getState: () => state,
       getScore: () => (world.players[0] ? world.players[0].score : 0),

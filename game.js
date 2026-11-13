@@ -11,7 +11,10 @@
     { id: "elk", name: "Elk", src: "assets/orange.png", flame: "assets/orange_flame.png", thumb: "assets/orange_full.png" },
     { id: "gorilla", name: "Gorilla", src: "assets/gorilla.png" },
     { id: "yellow", name: "Yellow", src: "assets/yellow.png" },
+    { id: "cg", name: "CG", src: "assets/cg.png", zippy: true },
   ];
+
+  let tickleImg = null;
 
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
@@ -47,7 +50,9 @@
     particles: [],
     popups: [],
     clouds: [],
+    tickles: [],
     spawnT: 0,
+    tickleT: 0,
     shake: 0,
     hintT: 0,
   };
@@ -109,6 +114,11 @@
   function sfxGhost() {
     beep(520, 0.12, "sine", 0.05, 0, 260);
   }
+  function sfxTickle() {
+    beep(980, 0.07, "sine", 0.07, 0, 1500);
+    beep(1320, 0.08, "sine", 0.05, 0.07, 1900);
+    beep(1600, 0.1, "square", 0.04, 0.14);
+  }
 
   function getBest() {
     const n = parseInt(localStorage.getItem(BEST_KEY) || "0", 10);
@@ -152,6 +162,7 @@
       boosting: false,
       ghost: false,
       flameFlicker: 1,
+      giggle: 0,
     };
   }
 
@@ -177,7 +188,9 @@
     world.stars = [];
     world.particles = [];
     world.popups = [];
+    world.tickles = [];
     world.spawnT = 1.1;
+    world.tickleT = 5.2;
     world.shake = 0;
     world.hintT = 3.4;
     pointers.clear();
@@ -241,14 +254,16 @@
     } else {
       const a = world.players[0] ? world.players[0].score : 0;
       const b = world.players[1] ? world.players[1].score : 0;
+      const n1 = world.players[0] && world.players[0].char ? world.players[0].char.name : "P1";
+      const n2 = world.players[1] && world.players[1].char ? world.players[1].char.name : "P2";
       let title = "It's a tie!";
-      if (a > b) title = "P1 Wins!";
-      else if (b > a) title = "P2 Wins!";
+      if (a > b) title = "P1 " + n1 + " Wins!";
+      else if (b > a) title = "P2 " + n2 + " Wins!";
       elOverTitle.textContent = title;
       elOver1p.hidden = true;
       elOver2p.hidden = false;
-      document.getElementById("over-s1").textContent = String(a);
-      document.getElementById("over-s2").textContent = String(b);
+      document.getElementById("over-s1").textContent = n1 + "  " + a;
+      document.getElementById("over-s2").textContent = n2 + "  " + b;
     }
     sfxOver();
   }
@@ -262,6 +277,7 @@
     const p1 = world.players[0];
     const p2 = world.players[1];
     if (p1) {
+      document.querySelector("#hud-p1 .hud-tag").textContent = "P1" + (p1.char && p1.char.name ? " " + p1.char.name : "");
       document.getElementById("hearts-p1").textContent = heartsText(p1.lives);
       document.getElementById("score-p1").textContent = String(p1.score);
     }
@@ -270,6 +286,7 @@
     } else {
       elHudMid.innerHTML = "";
       if (p2) {
+        document.querySelector("#hud-p2 .hud-tag").textContent = "P2" + (p2.char && p2.char.name ? " " + p2.char.name : "");
         document.getElementById("hearts-p2").textContent = heartsText(p2.lives);
         document.getElementById("score-p2").textContent = String(p2.score);
       }
@@ -352,11 +369,15 @@
     const MAX_DOWN = 520;
 
     for (const p of world.players) {
+      const zippy = !!(p.char && p.char.zippy);
+      const boost = zippy ? BOOST * 1.18 : BOOST;
       if (p.boosting) {
-        p.vy -= BOOST * dt;
+        p.vy -= boost * dt;
         if (Math.random() < 0.6) emitBoostPuff(p);
+        if (zippy && Math.random() < 0.85) emitZippyTrail(p);
       } else {
         p.vy += GRAVITY * dt;
+        if (zippy && Math.random() < 0.25) emitZippyTrail(p);
       }
       p.vy = clamp(p.vy, -MAX_UP, MAX_DOWN);
       p.y += p.vy * dt;
@@ -368,6 +389,7 @@
       if (p.y > maxY) { p.y = maxY; p.vy *= 0.25; }
 
       if (p.invuln > 0) p.invuln -= dt;
+      if (p.giggle > 0) p.giggle -= dt;
       const target = 0.88 + Math.sin(world.time * 26 + p.slot) * 0.1 + rand(-0.04, 0.04);
       p.flameFlicker += (target - p.flameFlicker) * Math.min(1, dt * 18);
     }
@@ -389,6 +411,13 @@
     for (const o of world.obstacles) o.x -= sp;
     for (const s of world.stars) s.x -= sp;
     scrollDecor(dt, world.speed);
+
+    world.tickleT -= dt;
+    if (world.tickleT <= 0 && livingPlayers().length) {
+      spawnTickle();
+      world.tickleT = rand(7.2, 11.5);
+    }
+    updateTickles(dt);
 
     for (const o of world.obstacles) {
       if (o.x < -80) continue;
@@ -441,6 +470,70 @@
     world.popups = world.popups.filter((p) => p.t < 0.7);
   }
 
+  function spawnTickle(x, y) {
+    const living = livingPlayers();
+    const target = living.length ? living[Math.floor(Math.random() * living.length)] : world.players[0];
+    const ty = target ? target.y : H * 0.45;
+    world.tickles.push({
+      x: x != null ? x : W + 90,
+      y: y != null ? y : clamp(ty + rand(-90, 90), 130, H - 150),
+      vy: 0,
+      wiggle: rand(0, 8),
+      life: 0,
+    });
+  }
+
+  function updateTickles(dt) {
+    const living = livingPlayers();
+    for (const t of world.tickles) {
+      t.life += dt;
+      t.wiggle += dt * 11;
+      if (living.length) {
+        let best = living[0], bd = 1e9;
+        for (const p of living) {
+          const d = Math.hypot(p.x - t.x, p.y - t.y);
+          if (d < bd) { bd = d; best = p; }
+        }
+        t.vy += (best.y - t.y) * 1.8 * dt;
+        t.vy = clamp(t.vy, -170, 170);
+        // Swoop left, linger a little if already beside the player so it's readable
+        const fly = t.x > best.x + 50 ? world.speed * 0.62 + 50 : world.speed * 0.28;
+        t.x -= fly * dt;
+      } else {
+        t.x -= world.speed * 0.65 * dt;
+      }
+      t.y += t.vy * dt + Math.sin(t.wiggle) * 28 * dt;
+      t.y = clamp(t.y, 110, H - 130);
+
+      for (const p of living) {
+        if (p.invuln > 0) continue;
+        const { drawW, drawH } = playerSize(p);
+        const hbW = drawW * 0.36, hbH = drawH * 0.38;
+        const hbY = p.y + drawH * 0.06, hbX = p.x;
+        if (ellipseHit(hbX, hbY, hbW, hbH, t.x - 8, t.y, 52, 40)) tickleHit(p);
+      }
+    }
+    world.tickles = world.tickles.filter((tk) => tk.x > -180 && tk.life < 16);
+  }
+
+  function tickleHit(p) {
+    const words = Math.random() < 0.5 ? "TICKLE!" : "hee hee";
+    world.popups.push({ x: p.x, y: p.y - 46, t: 0, text: words, color: "#e14aa8" });
+    world.shake = Math.max(world.shake, 18);
+    p.giggle = 0.6;
+    for (let i = 0; i < 12; i++) {
+      const a = (Math.PI * 2 * i) / 12 + rand(-0.2, 0.2);
+      world.particles.push({
+        x: p.x, y: p.y,
+        vx: Math.cos(a) * rand(50, 150),
+        vy: Math.sin(a) * rand(50, 150),
+        t: 0, life: 0.55, r: rand(4, 9), kind: "tickle",
+      });
+    }
+    sfxTickle();
+    hitPlayer(p);
+  }
+
   function ellipseHit(ax, ay, aw, ah, bx, by, bw, bh) {
     const dx = (ax - bx) / (aw + bw);
     const dy = (ay - by) / (ah + bh);
@@ -458,6 +551,20 @@
       life: rand(0.25, 0.5),
       r: rand(6, 12),
       kind: "flame",
+    });
+  }
+
+  function emitZippyTrail(p) {
+    const { drawH } = playerSize(p);
+    world.particles.push({
+      x: p.x - 18 + rand(-8, 4),
+      y: p.y + drawH * 0.28 + rand(-12, 12),
+      vx: rand(-110, -40),
+      vy: rand(-30, 30),
+      t: 0,
+      life: rand(0.22, 0.42),
+      r: rand(5, 12),
+      kind: "zip",
     });
   }
 
@@ -526,6 +633,7 @@
       for (const o of world.obstacles) drawObstacle(o);
       for (const s of world.stars) if (!s.got) drawStar(s);
       for (const part of world.particles) drawParticle(part);
+      for (const tk of world.tickles) drawTickle(tk);
       for (const p of world.players) drawPlayer(p);
       for (const pop of world.popups) {
         ctx.save();
@@ -548,16 +656,34 @@
     const ch = p.char;
     if (!ch || !ch.image) return;
     const { drawW, drawH } = playerSize(p);
-    const bob = Math.sin(world.time * 4.2 + p.slot) * 4;
-    const stretch = p.boosting ? 1.13 : (p.vy > 80 ? 0.93 : 1);
+    const giggle = p.giggle > 0 ? Math.sin(world.time * 42) * 5 : 0;
+    const bob = Math.sin(world.time * 4.2 + p.slot) * 4 + giggle;
+    const stretch = p.boosting ? (ch.zippy ? 1.18 : 1.13) : (p.vy > 80 ? 0.93 : 1);
     const sx = 1 / Math.sqrt(stretch);
     const sy = stretch;
-    const rot = clamp(p.vy * -0.00045, -0.2, 0.2) + Math.sin(world.time * 6.5 + p.slot) * 0.035;
+    const rot = clamp(p.vy * -0.00045, -0.2, 0.2) + Math.sin(world.time * 6.5 + p.slot) * 0.035
+      + (p.giggle > 0 ? Math.sin(world.time * 36) * 0.14 : 0);
 
     ctx.save();
     ctx.translate(p.x, p.y + bob);
     ctx.rotate(rot);
     ctx.scale(sx, sy);
+
+    if (ch.zippy && !p.ghost) {
+      ctx.save();
+      ctx.globalAlpha = p.invuln > 0 && Math.floor(p.invuln * 12) % 2 === 0 ? 0.25 : 0.7;
+      for (let i = 0; i < 4; i++) {
+        const ox = -drawW * (0.35 + i * 0.16);
+        const oy = drawH * 0.28 + Math.sin(world.time * 18 + i) * 5;
+        const g = ctx.createLinearGradient(ox - 18, 0, ox + 12, 0);
+        g.addColorStop(0, "rgba(40,210,255,0)");
+        g.addColorStop(0.5, i % 2 ? "rgba(255,80,200,0.85)" : "rgba(80,230,255,0.9)");
+        g.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(ox - 22, oy - 3, 36, 6);
+      }
+      ctx.restore();
+    }
 
     if (p.ghost) ctx.globalAlpha = 0.38;
     else if (p.invuln > 0 && Math.floor(p.invuln * 12) % 2 === 0) ctx.globalAlpha = 0.4;
@@ -610,29 +736,66 @@
     }
   }
 
+  function drawTickle(t) {
+    if (!tickleImg) return;
+    const wiggle = Math.sin(t.wiggle) * 0.14;
+    const finger = Math.sin(t.wiggle * 1.8) * 0.07;
+    const drawH = clamp(H * 0.15, 88, 128);
+    const drawW = (tickleImg.width / tickleImg.height) * drawH;
+    ctx.save();
+    ctx.translate(t.x, t.y + Math.sin(t.wiggle) * 6);
+    ctx.rotate(-0.12 + wiggle);
+    ctx.scale(1 + finger * 0.05, 1 - finger * 0.05);
+    ctx.drawImage(tickleImg, -drawW * 0.55, -drawH * 0.5, drawW, drawH);
+    ctx.restore();
+  }
+
   function drawObstacle(o) {
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
     if (o.kind === "spike") {
-      const n = 9;
+      // Glossy red/magenta spike ball — clearly not a gold star
+      const halo = ctx.createRadialGradient(0, 0, o.r * 0.2, 0, 0, o.r * 1.7);
+      halo.addColorStop(0, "rgba(255,70,130,0.5)");
+      halo.addColorStop(1, "rgba(120,0,60,0)");
+      ctx.fillStyle = halo;
       ctx.beginPath();
-      for (let i = 0; i <= n; i++) {
-        const a = (i / n) * Math.PI * 2 - Math.PI / 2;
-        const rr = i % 2 === 0 ? o.r * 1.25 : o.r * 0.7;
-        const fn = i === 0 ? "moveTo" : "lineTo";
-        ctx[fn](Math.cos(a) * rr, Math.sin(a) * rr);
+      ctx.arc(0, 0, o.r * 1.65, 0, Math.PI * 2);
+      ctx.fill();
+
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a - 0.2) * o.r * 0.7, Math.sin(a - 0.2) * o.r * 0.7);
+        ctx.lineTo(Math.cos(a) * o.r * 1.38, Math.sin(a) * o.r * 1.38);
+        ctx.lineTo(Math.cos(a + 0.2) * o.r * 0.7, Math.sin(a + 0.2) * o.r * 0.7);
+        ctx.closePath();
+        const sg = ctx.createLinearGradient(0, 0, Math.cos(a) * o.r, Math.sin(a) * o.r);
+        sg.addColorStop(0, "#ff6b9a");
+        sg.addColorStop(1, "#6a0834");
+        ctx.fillStyle = sg;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#3a0518";
+        ctx.stroke();
       }
-      ctx.closePath();
-      const g = ctx.createRadialGradient(-o.r * 0.2, -o.r * 0.2, 4, 0, 0, o.r * 1.2);
-      g.addColorStop(0, "#ffd36b");
-      g.addColorStop(0.45, "#f0a02a");
-      g.addColorStop(1, "#b85010");
+      const g = ctx.createRadialGradient(-o.r * 0.28, -o.r * 0.28, 3, 0, 0, o.r * 0.86);
+      g.addColorStop(0, "#ffe0f0");
+      g.addColorStop(0.35, "#e01868");
+      g.addColorStop(1, "#6a0a40");
+      ctx.beginPath();
+      ctx.arc(0, 0, o.r * 0.78, 0, Math.PI * 2);
       ctx.fillStyle = g;
       ctx.fill();
       ctx.lineWidth = 3;
-      ctx.strokeStyle = "#4a2a10";
+      ctx.strokeStyle = "#3a0518";
       ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.beginPath();
+      ctx.ellipse(-o.r * 0.22, -o.r * 0.26, o.r * 0.2, o.r * 0.12, -0.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (o.kind === "rock") {
       ctx.beginPath();
       const pts = 7;
@@ -643,24 +806,37 @@
         ctx[fn](Math.cos(a) * rr, Math.sin(a) * rr);
       }
       ctx.closePath();
-      const g = ctx.createLinearGradient(-o.r, -o.r, o.r, o.r);
-      g.addColorStop(0, "#c8c0b4");
-      g.addColorStop(1, "#6e6458");
+      const g = ctx.createRadialGradient(-o.r * 0.35, -o.r * 0.4, 4, o.r * 0.2, o.r * 0.3, o.r * 1.15);
+      g.addColorStop(0, "#f0eaff");
+      g.addColorStop(0.4, "#8d7bb8");
+      g.addColorStop(1, "#2e2448");
       ctx.fillStyle = g;
       ctx.fill();
       ctx.lineWidth = 3;
-      ctx.strokeStyle = "#3a332c";
+      ctx.strokeStyle = "#1c1630";
       ctx.stroke();
-    } else {
-      drawPuff(0, 0, o.r * 1.15, "#5a6a88");
-      drawPuff(-o.r * 0.15, -o.r * 0.1, o.r * 0.95, "#6d7c9a");
-      ctx.fillStyle = "#f5d76e";
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
       ctx.beginPath();
-      ctx.moveTo(-6, o.r * 0.45);
-      ctx.lineTo(4, o.r * 0.45);
-      ctx.lineTo(-2, o.r * 0.95);
+      ctx.ellipse(-o.r * 0.28, -o.r * 0.3, o.r * 0.28, o.r * 0.16, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      drawPuff(0, 0, o.r * 1.15, "#4a5f9a");
+      drawPuff(-o.r * 0.15, -o.r * 0.1, o.r * 0.95, "#6f85c4");
+      drawPuff(o.r * 0.2, -o.r * 0.25, o.r * 0.55, "rgba(230,240,255,0.55)");
+      // cyan spark (not gold, so it won't look like a star)
+      ctx.fillStyle = "#9be7ff";
+      ctx.strokeStyle = "#2a5080";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(2, -o.r * 0.15);
+      ctx.lineTo(-4, o.r * 0.2);
+      ctx.lineTo(1, o.r * 0.2);
+      ctx.lineTo(-2, o.r * 0.55);
+      ctx.lineTo(8, o.r * 0.05);
+      ctx.lineTo(2, o.r * 0.08);
       ctx.closePath();
       ctx.fill();
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -678,10 +854,29 @@
       ctx.lineTo(Math.cos(b) * r * 0.42, Math.sin(b) * r * 0.42);
     }
     ctx.closePath();
-    ctx.fillStyle = "#ffe566";
+    const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, r * 1.35);
+    glow.addColorStop(0, "rgba(255,240,120,0.55)");
+    glow.addColorStop(1, "rgba(255,200,40,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+      const b = a + Math.PI / 5;
+      ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      ctx.lineTo(Math.cos(b) * r * 0.42, Math.sin(b) * r * 0.42);
+    }
+    ctx.closePath();
+    const g = ctx.createRadialGradient(-r * 0.15, -r * 0.2, 2, 0, 0, r);
+    g.addColorStop(0, "#fff6b0");
+    g.addColorStop(0.55, "#ffe033");
+    g.addColorStop(1, "#f0a000");
+    ctx.fillStyle = g;
     ctx.fill();
     ctx.lineWidth = 3;
-    ctx.strokeStyle = "#d49a10";
+    ctx.strokeStyle = "#c97800";
     ctx.stroke();
     ctx.restore();
   }
@@ -698,6 +893,24 @@
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.ellipse(p.x, p.y, p.r * 0.7, p.r, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.kind === "zip") {
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+      g.addColorStop(0, "#ffffff");
+      g.addColorStop(0.35, "#7af0ff");
+      g.addColorStop(1, "rgba(255,80,200,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.r * 1.3, p.r * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.kind === "tickle") {
+      ctx.fillStyle = "#ff8ad4";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(p.x - p.r * 0.25, p.y - p.r * 0.25, p.r * 0.28, 0, Math.PI * 2);
       ctx.fill();
     } else {
       ctx.fillStyle = "#ffe566";
@@ -903,11 +1116,12 @@
     resize();
     seedClouds();
     try {
+      const tickleP = loadImage("assets/tickle.png").then((img) => { tickleImg = img; });
       await Promise.all(CHARS.map(async (c) => {
         c.image = await loadImage(c.src);
         if (c.flame) c.flameImg = await loadImage(c.flame);
         if (c.thumb) c.thumbImg = await loadImage(c.thumb);
-      }));
+      }).concat([tickleP]));
     } catch (err) {
       elLoading.textContent = "Could not load pictures. Try refreshing.";
       console.error(err);
@@ -963,6 +1177,7 @@
         if (b) keysDown.add("Space");
       },
       ready: true,
+      spawnTickle: (x, y) => spawnTickle(x, y),
       getState: () => state,
       getScore: () => (world.players[0] ? world.players[0].score : 0),
       getScore2: () => (world.players[1] ? world.players[1].score : 0),

@@ -26,10 +26,72 @@
     ghostSmall: "assets/ghost_small.png",
   };
   const houseEnemyImgs = {};
-  let campaign = "classic"; // classic | house
+  let campaign = "classic"; // classic | house | adventure
   let skipNextIntro = false;
-  function roster() { return campaign === "house" ? HOUSE_CHARS : CHARS; }
+  let levelKind = "sky"; // sky | yard | house | boss
+  let adventureLevel = 0; // 0-based
+  let pendingLevel = 0;
+  let muted = false;
+  let musicT = 0;
+
+  const ADV_KEY = "turboBuddiesAdventure";
+  const ADV_LEVELS = [
+    { name: "Sky Park", kind: "sky", goalDist: 4200, tickle: false, spawnScale: 0.95 },
+    { name: "Windy Trail", kind: "sky", goalDist: 5200, tickle: true, spawnScale: 1.15 },
+    { name: "Cloud Run", kind: "sky", goalDist: 6200, tickle: true, spawnScale: 1.4 },
+    { name: "The Big House", kind: "yard" },
+    { name: "Living Room", kind: "house", goalDist: 4000, spawnScale: 1 },
+    { name: "Hallway", kind: "house", goalDist: 5200, spawnScale: 1.3 },
+    { name: "Eye Boss", kind: "boss" },
+  ];
+  const START_CHARS = ["frog", "ape", "gorilla"];
+  const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike" };
+
+  let advSave = loadAdv();
+  muted = !!advSave.muted;
+
+  function allBuddies() { return CHARS.concat(HOUSE_CHARS); }
+  function roster() {
+    if (campaign === "house") return HOUSE_CHARS;
+    if (campaign === "adventure") return allBuddies();
+    return CHARS;
+  }
   function bestKey() { return campaign === "house" ? HOUSE_BEST_KEY : BEST_KEY; }
+
+  function isGroundMode() {
+    return campaign === "house" || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
+  }
+  function isYardMode() {
+    return campaign === "house" || (campaign === "adventure" && levelKind === "yard");
+  }
+  function isSkyMode() {
+    return campaign === "classic" || (campaign === "adventure" && levelKind === "sky");
+  }
+
+  function defaultAdv() {
+    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
+  }
+  function loadAdv() {
+    try {
+      const raw = localStorage.getItem(ADV_KEY);
+      if (!raw) return defaultAdv();
+      const d = JSON.parse(raw);
+      const base = defaultAdv();
+      if (!Array.isArray(d.stars) || d.stars.length !== 7) d.stars = base.stars;
+      if (!Array.isArray(d.chars) || !d.chars.length) d.chars = base.chars;
+      d.unlockedThrough = Math.max(1, Math.min(7, d.unlockedThrough || 1));
+      return d;
+    } catch (e) { return defaultAdv(); }
+  }
+  function writeAdv() {
+    try {
+      advSave.muted = muted;
+      localStorage.setItem(ADV_KEY, JSON.stringify(advSave));
+    } catch (e) { /* ignore */ }
+  }
+  function isCharUnlocked(id) {
+    return (advSave.chars || START_CHARS).indexOf(id) !== -1;
+  }
 
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
@@ -97,7 +159,7 @@
   }
 
   function beep(freq, dur, type, vol, at, slide) {
-    if (!audioCtx) return;
+    if (muted || !audioCtx) return;
     const t0 = audioCtx.currentTime + (at || 0);
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
@@ -141,6 +203,26 @@
     beep(980, 0.07, "sine", 0.07, 0, 1500);
     beep(1320, 0.08, "sine", 0.05, 0.07, 1900);
     beep(1600, 0.1, "square", 0.04, 0.14);
+  }
+  function sfxWin() {
+    beep(523, 0.12, "sine", 0.07, 0);
+    beep(659, 0.12, "sine", 0.07, 0.1);
+    beep(784, 0.12, "sine", 0.07, 0.2);
+    beep(1046, 0.28, "sine", 0.08, 0.32);
+  }
+  function sfxUnlock() {
+    beep(784, 0.1, "square", 0.07, 0);
+    beep(1175, 0.18, "square", 0.07, 0.12);
+  }
+  function tickMusic(dt) {
+    if (muted || !audioCtx) return;
+    if (state === "start" || state === "load") return;
+    musicT += dt;
+    if (musicT < 0.28) return;
+    musicT = 0;
+    const notes = [523, 659, 784, 659, 523, 392, 440, 523];
+    tickMusic._i = (tickMusic._i || 0) + 1;
+    beep(notes[tickMusic._i % notes.length], 0.16, "sine", 0.02);
   }
 
   function getBest() {
@@ -200,10 +282,10 @@
   }
 
   function resetRun() {
-    const yOff1 = campaign === "house" ? 0 : (mode === 2 ? -40 : 0);
+    const yOff1 = isGroundMode() || isYardMode() ? 0 : (mode === 2 ? -40 : 0);
     const p1 = makePlayer(1, chosen.p1, yOff1);
     world.players = [p1];
-    if (mode === 2) world.players.push(makePlayer(2, chosen.p2, campaign === "house" ? 0 : 50));
+    if (mode === 2) world.players.push(makePlayer(2, chosen.p2, isGroundMode() || isYardMode() ? 0 : 50));
     placePlayers();
     world.time = 0;
     world.dist = 0;
@@ -223,6 +305,11 @@
     world.flashT = 3.8;
     world.flashAge = 0;
     world.fade = 0;
+    world.levelDone = false;
+    world.bossMode = false;
+    world.goalDist = 0;
+    world.tickleOn = campaign !== "adventure";
+    world.spawnScale = 1;
     pointers.clear();
     keysDown.clear();
     seedClouds();
@@ -246,20 +333,26 @@
     ensureAudio();
     sfxStart();
     resetRun();
+    applyAdventureLevel();
     elStart.hidden = true;
     elOver.hidden = true;
     elHud.classList.toggle("onep", mode === 1);
     elHudP2.hidden = mode !== 2;
     elHint.classList.toggle("twop", mode === 2);
     if (mode === 2) {
-      elHint.innerHTML = campaign === "house"
+      elHint.innerHTML = isGroundMode()
         ? '<span class="h1">P1: tap left to jump</span><span class="h2">P2: tap right to jump</span>'
         : '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
+    } else if (campaign === "adventure" && levelKind === "boss") {
+      elHint.textContent = "JUMP ON THE EYE!";
+    } else if (isGroundMode()) {
+      elHint.textContent = "TAP TO JUMP! Stomp baddies on the head!";
     } else {
-      elHint.textContent = campaign === "house" ? "TAP TO JUMP! Stomp baddies on the head!" : "HOLD TO FLY!";
+      elHint.textContent = "HOLD TO FLY!";
     }
     updateHud();
-    if (campaign === "house" && !skipNextIntro) {
+    hideAdventureOverlays();
+    if (isYardMode() && !skipNextIntro) {
       state = "yard";
       setupYard();
       elHud.hidden = true;
@@ -274,11 +367,13 @@
     state = "play";
     elHud.hidden = false;
     elHint.hidden = false;
-    if (campaign === "house") {
+    if (isGroundMode()) {
       placePlayers();
       for (const p of world.players) standOnFloor(p);
       world.spawnT = 0.8;
-      if (!world.platforms.length) {
+      if (campaign === "adventure" && levelKind === "boss") {
+        setupBossLevel();
+      } else if (!world.platforms.length) {
         const fy = houseFloorTop();
         world.platforms.push(makeHousePlatform("sofa", W * 0.58, fy - 44));
       }
@@ -356,6 +451,10 @@
   }
 
   function gameOver() {
+    if (campaign === "adventure") {
+      showLevelEnd(false);
+      return;
+    }
     state = "over";
     world.players.forEach((p) => { p.boosting = false; });
     pointers.clear();
@@ -401,7 +500,12 @@
       document.getElementById("score-p1").textContent = String(p1.score);
     }
     if (mode === 1) {
-      elHudMid.innerHTML = p1 ? '<div class="pscore">' + p1.score + "</div>" : "";
+      let mid = p1 ? '<div class="pscore">' + p1.score + "</div>" : "";
+      if (campaign === "adventure" && world.goalDist && p1) {
+        const pct = Math.max(0, Math.min(100, (world.dist / world.goalDist) * 100));
+        mid += '<div class="adv-progress"><div class="bar-bg"><div class="bar-fg" style="width:' + pct + '%"></div></div></div>';
+      }
+      elHudMid.innerHTML = mid;
     } else {
       elHudMid.innerHTML = "";
       if (p2) {
@@ -436,7 +540,7 @@
   }
 
   function spawnWave() {
-    if (campaign === "house") { spawnHouseWave(); return; }
+    if (isGroundMode()) { if (!world.bossMode) spawnHouseWave(); return; }
     const sample = world.players[0] || makePlayer(1, CHARS[0], 0);
     const { drawH } = playerSize(sample);
     const margin = 50 + drawH * 0.15;
@@ -493,7 +597,7 @@
   }
 
   function spawnHouseWave() {
-    const kinds = ["ghostSmall", "ghostSmall", "ghostBig", "eye"];
+    const kinds = ["ghostSmall", "ghostSmall", "ghostBig", "ghostSmall"];
     const kind = kinds[(Math.random() * kinds.length) | 0];
     const floor = houseFloorTop();
     const r = kind === "eye" ? 50 : kind === "ghostBig" ? 46 : 34;
@@ -540,7 +644,10 @@
       p.boosting = false;
     }
     if (t > 1.45) world.fade = clamp((t - 1.45) / 0.28, 0, 1);
-    if (t > 1.75) beginPlay();
+    if (t > 1.75) {
+      if (campaign === "adventure" && levelKind === "yard") levelComplete();
+      else beginPlay();
+    }
   }
 
   function fireFlashlight() {
@@ -586,6 +693,16 @@
 
   function update(dt) {
     world.time += dt;
+    tickMusic(dt);
+    if (state === "play" && campaign === "adventure" && world.goalDist) {
+      world._hudT = (world._hudT || 0) + dt;
+      if (world._hudT > 0.2) { world._hudT = 0; updateHud(); }
+    }
+    if (state === "map") return;
+    if (state === "victory") {
+      updateVictory(dt);
+      return;
+    }
     if (state === "yard") {
       updateYard(dt);
       return;
@@ -599,8 +716,9 @@
       return;
     }
 
-    if (campaign === "house") {
+    if (isGroundMode()) {
       updateHousePlay(dt);
+      maybeCompleteLevel();
       return;
     }
 
@@ -649,7 +767,7 @@
     }
 
     world.spawnT -= dt;
-    const interval = Math.max(1.05, 1.85 - world.dist / 6000);
+    const interval = Math.max(0.85, 1.85 - world.dist / 6000) / (world.spawnScale || 1);
     if (world.spawnT <= 0) {
       spawnWave();
       world.spawnT = interval;
@@ -659,7 +777,7 @@
     for (const s of world.stars) s.x -= sp;
     scrollDecor(dt, world.speed);
 
-    if (campaign !== "house") {
+    if (isSkyMode() && world.tickleOn) {
       world.tickleT -= dt;
       if (world.tickleT <= 0 && livingPlayers().length) {
         spawnTickle();
@@ -732,6 +850,7 @@
       pop.y -= 50 * dt;
     }
     world.popups = world.popups.filter((p) => p.t < 0.7);
+    maybeCompleteLevel();
   }
 
   function requestJump(slot) {
@@ -753,7 +872,12 @@
   }
 
   function updateHousePlay(dt) {
-    world.speed = 150 + Math.min(160, world.dist / 40);
+    if (world.bossMode) {
+      world.speed = 0;
+      updateBoss(dt);
+    } else {
+      world.speed = 150 + Math.min(160, world.dist / 40);
+    }
     const sp = world.speed * dt;
     world.dist += sp;
     const GRAVITY = 1850;
@@ -803,7 +927,7 @@
     if (world.fade > 0) world.fade = Math.max(0, world.fade - dt * 2.8);
 
     world.spawnT -= dt;
-    const interval = Math.max(1.15, 1.9 - world.dist / 7000);
+    const interval = Math.max(0.95, 1.9 - world.dist / 7000) / (world.spawnScale || 1);
     if (world.spawnT <= 0) {
       spawnHouseWave();
       world.spawnT = interval;
@@ -1025,6 +1149,10 @@
         world.popups.push({ x: o.x, y: o.y - 28, t: 0, text: "POOF!", color: "#ffe566" });
         bigPoof(o.x, o.y);
         sfxPoof();
+        if (campaign === "adventure" && levelKind === "boss") {
+          world.bossDefeated = true;
+          world.bossDefeatT = 0;
+        }
       } else {
         addScore(p, 15, o.x, o.y);
         world.popups.push({ x: o.x, y: o.y - 20, t: 0, text: "STOMP!", color: "#7dff8a" });
@@ -1054,9 +1182,19 @@
     ctx.save();
     ctx.translate(sx, sy);
 
+    if (state === "map") {
+      drawAdventureMap();
+      ctx.restore();
+      return;
+    }
+    if (state === "victory") {
+      drawVictory();
+      ctx.restore();
+      return;
+    }
     if (state === "yard" || state === "intro") {
       drawHouseOutside();
-    } else if (campaign === "house") {
+    } else if (isGroundMode()) {
       drawHouseInside();
     } else {
       const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -1097,14 +1235,15 @@
     }
 
     if (state === "play" || state === "over") {
-      if (campaign === "house") {
+      if (isGroundMode()) {
         for (const pl of world.platforms) drawHousePlatform(pl);
       }
+      if (campaign === "adventure" && world.goalDist) drawFinishLine();
       for (const o of world.obstacles) drawObstacle(o);
-      for (const s of world.stars) if (!s.got) drawStar(s);
+      for (const st of world.stars) if (!st.got) drawStar(st);
       for (const part of world.particles) drawParticle(part);
-      if (campaign !== "house") for (const tk of world.tickles) drawTickle(tk);
-      for (const p of world.players) drawPlayer(p);
+      if (isSkyMode()) for (const tk of world.tickles) drawTickle(tk);
+      for (const plr of world.players) drawPlayer(plr);
       for (const pop of world.popups) {
         ctx.save();
         ctx.globalAlpha = 1 - pop.t / 0.7;
@@ -1932,11 +2071,15 @@
   window.addEventListener("pointerdown", (e) => {
     ensureAudio();
     if (isUiTarget(e.target)) return;
+    if (state === "map") {
+      onMapTap(e.clientX, e.clientY);
+      return;
+    }
     if (state === "yard") {
       if (tapHitsHouse(e.clientX, e.clientY)) startEnterHouse();
       return;
     }
-    if (state === "play" && campaign === "house") {
+    if (state === "play" && isGroundMode()) {
       requestJump(playerForPointerX(e.clientX));
       return;
     }
@@ -1970,7 +2113,7 @@
         startEnterHouse();
         return;
       }
-      if (state === "play" && campaign === "house") {
+      if (state === "play" && isGroundMode()) {
         if (mode === 1) requestJump(1);
         else if (isP1Key(e.code)) requestJump(1);
         else requestJump(2);
@@ -1996,11 +2139,13 @@
   document.getElementById("again").addEventListener("click", (e) => {
     e.preventDefault();
     ensureAudio();
-    skipNextIntro = campaign !== "house";
+    if (campaign === "adventure") { retryAdventureLevel(); return; }
+    skipNextIntro = !isYardMode();
     startGame();
   });
   document.getElementById("change").addEventListener("click", (e) => {
     e.preventDefault();
+    if (campaign === "adventure") { showAdventureMap(); return; }
     const wasHouse = campaign === "house";
     if (wasHouse) showHousePlayers();
     else showModeSelect();
@@ -2020,7 +2165,11 @@
     elPrompt.hidden = true;
     elBack.hidden = true;
     document.getElementById("modeHouse").hidden = false;
-    elTagline.textContent = "Fly & dodge — pick a mode!";
+    const advBtn = document.getElementById("modeAdventure");
+    if (advBtn) advBtn.hidden = false;
+    const free = document.querySelector(".free-play-label");
+    if (free) free.hidden = false;
+    elTagline.textContent = "A buddy adventure!";
     elPrompt.className = "pick-prompt";
   }
 
@@ -2033,6 +2182,10 @@
     elPrompt.hidden = true;
     elBack.hidden = false;
     document.getElementById("modeHouse").hidden = true;
+    const advBtn = document.getElementById("modeAdventure");
+    if (advBtn) advBtn.hidden = true;
+    const free = document.querySelector(".free-play-label");
+    if (free) free.hidden = true;
     elTagline.textContent = "The Big House — 1 or 2 players?";
   }
 
@@ -2043,7 +2196,10 @@
     elPrompt.hidden = false;
     elBack.hidden = false;
     renderCards();
-    if (campaign === "house") {
+    if (campaign === "adventure") {
+      const lv = ADV_LEVELS[pendingLevel] || ADV_LEVELS[0];
+      elTagline.textContent = lv.name + " — pick a buddy!";
+    } else if (campaign === "house") {
       elTagline.textContent = "The Big House — pick a hero!";
     } else {
       elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
@@ -2076,7 +2232,17 @@
       label.textContent = c.name;
       btn.appendChild(img);
       btn.appendChild(label);
-      btn.addEventListener("click", () => pickChar(c));
+      const locked = campaign === "adventure" && !isCharUnlocked(c.id);
+      if (locked) {
+        btn.classList.add("locked");
+        btn.disabled = true;
+        const lock = document.createElement("span");
+        lock.className = "lock-tag";
+        lock.textContent = "🔒";
+        btn.appendChild(lock);
+      } else {
+        btn.addEventListener("click", () => pickChar(c));
+      }
       elCards.appendChild(btn);
     }
   }
@@ -2114,9 +2280,48 @@
     ensureAudio();
     showHousePlayers();
   });
+  document.getElementById("modeAdventure").addEventListener("click", () => {
+    ensureAudio();
+    showAdventureMap();
+  });
+  document.getElementById("map-back").addEventListener("click", () => {
+    hideAdventureOverlays();
+    state = "start";
+    showModeSelect();
+    elStart.hidden = false;
+  });
+  document.getElementById("btn-retry").addEventListener("click", () => {
+    ensureAudio();
+    retryAdventureLevel();
+  });
+  document.getElementById("btn-map").addEventListener("click", () => {
+    ensureAudio();
+    showAdventureMap();
+  });
+  document.getElementById("btn-next").addEventListener("click", () => {
+    ensureAudio();
+    const nxt = adventureLevel + 1;
+    if (nxt >= ADV_LEVELS.length) showVictory();
+    else showAdventurePick(nxt);
+  });
+  document.getElementById("btn-victory-map").addEventListener("click", () => {
+    ensureAudio();
+    showAdventureMap();
+  });
+  document.getElementById("btn-victory-title").addEventListener("click", () => {
+    hideAdventureOverlays();
+    state = "start";
+    showModeSelect();
+    elStart.hidden = false;
+  });
+  document.getElementById("btn-mute").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleMute();
+  });
   elBack.addEventListener("click", () => {
     if (pickStep === "p2") showPick("p1");
     else if (pickStep === "p1" && campaign === "house") showHousePlayers();
+    else if (pickStep === "adv-pick" || (pickStep === "p1" && campaign === "adventure")) showAdventureMap();
     else showModeSelect();
   });
 
@@ -2124,6 +2329,12 @@
   window.addEventListener("orientationchange", () => setTimeout(resize, 200));
 
   function pickChar(c) {
+    if (campaign === "adventure" && (pickStep === "p1" || pickStep === "adv-pick")) {
+      chosen.p1 = c;
+      chosen.p2 = null;
+      startAdventureLevel(pendingLevel);
+      return;
+    }
     if (pickStep === "p1" || mode === 1) {
       chosen.p1 = c;
       if (mode === 1) startGame();
@@ -2135,7 +2346,458 @@
     }
   }
 
-  async function boot() {
+
+  function hideAdventureOverlays() {
+    const mapUi = document.getElementById("map-ui");
+    const end = document.getElementById("level-end");
+    const vic = document.getElementById("victory");
+    const pop = document.getElementById("unlock-pop");
+    if (mapUi) mapUi.hidden = true;
+    if (end) end.hidden = true;
+    if (vic) vic.hidden = true;
+    if (pop) pop.hidden = true;
+  }
+
+  function applyAdventureLevel() {
+    if (campaign !== "adventure") return;
+    const lv = ADV_LEVELS[adventureLevel] || ADV_LEVELS[0];
+    levelKind = lv.kind;
+    world.goalDist = lv.goalDist || 0;
+    world.tickleOn = !!lv.tickle;
+    world.spawnScale = lv.spawnScale || 1;
+    world.bossMode = lv.kind === "boss";
+    world.bossDefeated = false;
+    world.bossDefeatT = 0;
+    mode = 1;
+  }
+
+  function startAdventureLevel(index) {
+    campaign = "adventure";
+    mode = 1;
+    adventureLevel = clamp(index, 0, ADV_LEVELS.length - 1);
+    pendingLevel = adventureLevel;
+    const lv = ADV_LEVELS[adventureLevel];
+    levelKind = lv.kind;
+    skipNextIntro = false;
+    hideAdventureOverlays();
+    startGame();
+  }
+
+  function retryAdventureLevel() {
+    skipNextIntro = false;
+    startAdventureLevel(adventureLevel);
+  }
+
+  function maybeCompleteLevel() {
+    if (campaign !== "adventure" || world.levelDone || world.bossMode) return;
+    if (!world.goalDist) return;
+    if (world.dist >= world.goalDist) levelComplete();
+  }
+
+  function levelComplete() {
+    if (world.levelDone) return;
+    world.levelDone = true;
+    if (campaign === "adventure" && levelKind === "boss") {
+      showVictory();
+      return;
+    }
+    showLevelEnd(true);
+  }
+
+  function showLevelEnd(won) {
+    state = "over";
+    world.players.forEach((p) => { p.boosting = false; });
+    pointers.clear();
+    elHint.hidden = true;
+    elOver.hidden = true;
+    hideAdventureOverlays();
+    const el = document.getElementById("level-end");
+    const title = document.getElementById("level-end-title");
+    const starsEl = document.getElementById("level-stars");
+    const msg = document.getElementById("level-end-msg");
+    const next = document.getElementById("btn-next");
+    el.hidden = false;
+    let unlockedName = "";
+    if (won) {
+      const lives = world.players[0] ? world.players[0].lives : 1;
+      const stars = clamp(Math.max(1, lives), 1, 3);
+      const prev = advSave.stars[adventureLevel] || 0;
+      advSave.stars[adventureLevel] = Math.max(prev, stars);
+      if (advSave.unlockedThrough < adventureLevel + 2) {
+        advSave.unlockedThrough = Math.min(7, adventureLevel + 2);
+      }
+      const rewardId = UNLOCK_BY_LEVEL[adventureLevel];
+      if (rewardId && advSave.chars.indexOf(rewardId) === -1) {
+        advSave.chars.push(rewardId);
+        const ch = allBuddies().find((c) => c.id === rewardId);
+        unlockedName = ch ? ch.name : rewardId;
+        showUnlockToast(unlockedName);
+      }
+      writeAdv();
+      title.textContent = "Level Complete!";
+      starsEl.innerHTML = "★".repeat(stars) + "☆".repeat(3 - stars);
+      msg.textContent = unlockedName ? ("Unlocked: " + unlockedName + "!") : "Nice job!";
+      const hasNext = adventureLevel < ADV_LEVELS.length - 1;
+      next.hidden = !hasNext;
+      next.textContent = "Next";
+      sfxWin();
+    } else {
+      title.textContent = "Try again!";
+      starsEl.innerHTML = "☆☆☆";
+      msg.textContent = "You can do it!";
+      next.hidden = true;
+      sfxOver();
+    }
+  }
+
+  function showUnlockToast(name) {
+    const pop = document.getElementById("unlock-pop");
+    if (!pop) return;
+    pop.textContent = "Unlocked: " + name + "!";
+    pop.hidden = false;
+    sfxUnlock();
+    clearTimeout(showUnlockToast._t);
+    showUnlockToast._t = setTimeout(() => { pop.hidden = true; }, 2200);
+  }
+
+  function showAdventureMap() {
+    campaign = "adventure";
+    mode = 1;
+    state = "map";
+    elStart.hidden = true;
+    elOver.hidden = true;
+    elHud.hidden = true;
+    elHint.hidden = true;
+    hideAdventureOverlays();
+    const mapUi = document.getElementById("map-ui");
+    if (mapUi) mapUi.hidden = false;
+    document.getElementById("unlock-pop").hidden = true;
+  }
+
+  function showAdventurePick(index) {
+    pendingLevel = index;
+    campaign = "adventure";
+    mode = 1;
+    pickStep = "adv-pick";
+    if (!chosen.p1 || !isCharUnlocked(chosen.p1.id)) {
+      chosen.p1 = allBuddies().find((c) => isCharUnlocked(c.id)) || CHARS[0];
+    }
+    chosen.p2 = null;
+    hideAdventureOverlays();
+    elStart.hidden = false;
+    elOver.hidden = true;
+    state = "start";
+    showPick("adv-pick");
+  }
+
+  let mapHits = [];
+
+  function onMapTap(x, y) {
+    for (const n of mapHits) {
+      if (Math.hypot(x - n.x, y - n.y) <= n.r) {
+        if (n.i + 1 <= advSave.unlockedThrough) {
+          sfxStart();
+          showAdventurePick(n.i);
+        } else {
+          // locked — tiny buzz
+          beep(180, 0.1, "square", 0.05);
+        }
+        return;
+      }
+    }
+  }
+
+  function drawAdventureMap() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#7ec8ff");
+    g.addColorStop(0.45, "#b8ecff");
+    g.addColorStop(0.72, "#c8f5a0");
+    g.addColorStop(1, "#8ed45a");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    // sun
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath();
+    ctx.arc(W - 54, 80, 26, 0, Math.PI * 2);
+    ctx.fill();
+    // clouds
+    function puff(x, y, sc) {
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.beginPath();
+      ctx.arc(x, y, 14 * sc, 0, Math.PI * 2);
+      ctx.arc(x + 16 * sc, y - 6 * sc, 18 * sc, 0, Math.PI * 2);
+      ctx.arc(x + 32 * sc, y, 14 * sc, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    puff(30, 110, 1);
+    puff(W * 0.4, 70, 0.8);
+    // little house at the top of the path
+    const hx = W * 0.72, hy = H * 0.16;
+    ctx.fillStyle = "#e23b3b";
+    ctx.beginPath();
+    ctx.moveTo(hx - 28, hy + 8);
+    ctx.lineTo(hx, hy - 18);
+    ctx.lineTo(hx + 28, hy + 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#ffe07a";
+    ctx.fillRect(hx - 22, hy + 8, 44, 28);
+    ctx.fillStyle = "#3a7bdd";
+    ctx.fillRect(hx - 6, hy + 18, 12, 18);
+
+    // winding path of 7 nodes
+    const nodes = [
+      { x: 0.22, y: 0.86 },
+      { x: 0.68, y: 0.78 },
+      { x: 0.30, y: 0.66 },
+      { x: 0.70, y: 0.54 },
+      { x: 0.28, y: 0.44 },
+      { x: 0.66, y: 0.34 },
+      { x: 0.42, y: 0.22 },
+    ];
+    const pts = nodes.map((n) => ({ x: n.x * W, y: n.y * H }));
+    ctx.lineWidth = 18;
+    ctx.strokeStyle = "#f0d18a";
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = "#d2a05a";
+    ctx.stroke();
+
+    mapHits = [];
+    const current = Math.min(advSave.unlockedThrough - 1, 6);
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const lv = ADV_LEVELS[i];
+      const unlocked = i + 1 <= advSave.unlockedThrough;
+      const stars = advSave.stars[i] || 0;
+      const isCurrent = unlocked && i === current && stars === 0 || (unlocked && i === Math.min(advSave.unlockedThrough - 1, 6) && i === current);
+      const pulse = (unlocked && i === advSave.unlockedThrough - 1) ? 1 + Math.sin(world.time * 4) * 0.08 : 1;
+      const r = 28 * pulse;
+      ctx.beginPath();
+      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
+      ctx.strokeStyle = "#16324a";
+      ctx.lineWidth = 4;
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#16324a";
+      ctx.font = "800 18px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (unlocked) ctx.fillText(String(i + 1), p.x, p.y);
+      else {
+        ctx.strokeStyle = "#16324a";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 5, 5, Math.PI, 0, false);
+        ctx.stroke();
+        ctx.fillStyle = "#16324a";
+        ctx.fillRect(p.x - 7, p.y - 4, 14, 11);
+      }
+      // label
+      ctx.font = "800 14px system-ui, sans-serif";
+      ctx.fillStyle = "#16324a";
+      ctx.textBaseline = "top";
+      const label = lv.name;
+      const ly = p.y + r + 6;
+      ctx.fillText(label, p.x, ly);
+      if (stars > 0) {
+        ctx.fillStyle = "#ffd24a";
+        ctx.font = "800 16px system-ui, sans-serif";
+        ctx.fillText("★".repeat(stars) + "☆".repeat(3 - stars), p.x, ly + 16);
+      }
+      mapHits.push({ i, x: p.x, y: p.y, r: r + 14 });
+    }
+  }
+
+  function drawFinishLine() {
+    const px = world.players[0] ? world.players[0].x : W * 0.28;
+    const fx = px + (world.goalDist - world.dist);
+    if (fx > W + 80 || fx < -60) return;
+    const fy = isGroundMode() ? houseFloorTop() : H * 0.22;
+    const top = isGroundMode() ? fy - 120 : 90;
+    const bot = isGroundMode() ? fy : H - 90;
+    ctx.save();
+    // pole
+    ctx.fillStyle = "#8a6a40";
+    ctx.fillRect(fx - 4, top, 8, bot - top);
+    // flag
+    ctx.fillStyle = "#ff4d8a";
+    ctx.beginPath();
+    ctx.moveTo(fx + 4, top + 4);
+    ctx.lineTo(fx + 54, top + 22);
+    ctx.lineTo(fx + 4, top + 40);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 12px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("GOAL", fx + 8, top + 24);
+    ctx.restore();
+  }
+
+  function setupBossLevel() {
+    world.bossMode = true;
+    world.spawnT = 999;
+    world.platforms = [];
+    world.obstacles = [];
+    world.stars = [];
+    const fy = houseFloorTop();
+    const eye = makeHouseEnemy("eye", W * 0.72, fy - 50 * 0.85);
+    eye.baseY = eye.y;
+    eye.dir = -1;
+    eye.hopT = 1.2;
+    eye.vy = 0;
+    world.obstacles.push(eye);
+    if (world.players[0]) {
+      world.players[0].x = clamp(W * 0.28, 80, 140);
+      standOnFloor(world.players[0]);
+      world.players[0].invuln = 0.8;
+    }
+  }
+
+  function updateBoss(dt) {
+    const fy = houseFloorTop();
+    for (const o of world.obstacles) {
+      if (o.kind !== "eye" || o.dead) continue;
+      o.dir = o.dir || -1;
+      o.x += o.dir * 90 * dt;
+      if (o.x > W * 0.84) { o.x = W * 0.84; o.dir = -1; }
+      if (o.x < W * 0.32) { o.x = W * 0.32; o.dir = 1; }
+      o.hopT = (o.hopT == null ? 1.2 : o.hopT) - dt;
+      o.vy = (o.vy || 0) + 1800 * dt;
+      o.y += o.vy * dt;
+      const land = fy - o.r * 0.85;
+      if (o.y >= land && o.vy >= 0) {
+        o.y = land;
+        o.vy = 0;
+        if (o.hopT <= 0) {
+          o.vy = -520;
+          o.hopT = 1.3 + Math.random() * 1.1;
+        }
+      }
+      o.baseY = o.y;
+    }
+    if (world.bossDefeated) {
+      world.bossDefeatT = (world.bossDefeatT || 0) + dt;
+      if (world.bossDefeatT > 0.85) showVictory();
+    }
+  }
+
+  function showVictory() {
+    if (state === "victory") return;
+    world.levelDone = true;
+    if (advSave.unlockedThrough < 7) advSave.unlockedThrough = 7;
+    // three stars on boss if they won with lives
+    if (world.players[0]) {
+      const stars = clamp(Math.max(1, world.players[0].lives), 1, 3);
+      advSave.stars[6] = Math.max(advSave.stars[6] || 0, stars);
+    }
+    writeAdv();
+    state = "victory";
+    world.players.forEach((p) => { p.boosting = false; });
+    pointers.clear();
+    elHint.hidden = true;
+    elHud.hidden = true;
+    elOver.hidden = true;
+    hideAdventureOverlays();
+    document.getElementById("victory").hidden = false;
+    world.victoryT = 0;
+    world.particles = [];
+    for (let i = 0; i < 60; i++) spawnConfetti(true);
+    sfxWin();
+  }
+
+  function spawnConfetti(burst) {
+    const colors = ["#ff6b9a", "#ffe14a", "#7ed957", "#7ec8f0", "#ff7ad9", "#ffb347", "#fff"];
+    world.particles.push({
+      x: burst ? rand(20, W - 20) : rand(20, W - 20),
+      y: burst ? rand(-40, H * 0.3) : -20,
+      vx: rand(-80, 80),
+      vy: rand(40, 180),
+      t: 0,
+      life: rand(1.4, 2.6),
+      r: rand(5, 10),
+      kind: "poof",
+      color: colors[(Math.random() * colors.length) | 0],
+    });
+  }
+
+  function updateVictory(dt) {
+    world.victoryT = (world.victoryT || 0) + dt;
+    if (Math.random() < 0.5) spawnConfetti(false);
+    for (const part of world.particles) {
+      part.x += part.vx * dt;
+      part.y += part.vy * dt;
+      part.vy += 90 * dt;
+      part.t += dt;
+    }
+    world.particles = world.particles.filter((pt) => pt.t < pt.life && pt.y < H + 40);
+  }
+
+  function drawVictory() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#9be4ff");
+    g.addColorStop(0.55, "#ffe9a0");
+    g.addColorStop(1, "#ffd6ea");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    // sun
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath();
+    ctx.arc(W - 70, 80, 34, 0, Math.PI * 2);
+    ctx.fill();
+    const buddies = allBuddies().filter((c) => c.image);
+    const t = world.victoryT || 0;
+    const n = buddies.length;
+    const midY = H * 0.42;
+    for (let i = 0; i < n; i++) {
+      const c = buddies[i];
+      const x = W * ((i + 0.6) / (n + 0.2));
+      const bob = Math.sin(t * 4 + i) * 14;
+      const jump = Math.abs(Math.sin(t * 3 + i * 0.7)) * 10;
+      const drawH = 88;
+      const drawW = (c.image.width / c.image.height) * drawH;
+      ctx.drawImage(c.image, x - drawW / 2, midY + bob - jump - drawH / 2, drawW, drawH);
+    }
+    for (const part of world.particles) drawParticle(part);
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#e14b1a";
+    ctx.lineWidth = 8;
+    ctx.font = "900 42px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.strokeText("You did it!", W / 2, 36);
+    ctx.fillText("You did it!", W / 2, 36);
+  }
+
+  function updateMuteBtn() {
+    const btn = document.getElementById("btn-mute");
+    if (btn) btn.textContent = muted ? "🔇" : "🔊";
+  }
+  function toggleMute() {
+    muted = !muted;
+    writeAdv();
+    updateMuteBtn();
+    if (!muted) ensureAudio();
+  }
+
+  function seedAdvShot() {
+    advSave.unlockedThrough = 5;
+    advSave.stars = [3, 2, 3, 1, 0, 0, 0];
+    advSave.chars = START_CHARS.concat(["yellow", "elk", "cg", "cap"]);
+  }
+
+
+    async function boot() {
     resize();
     seedClouds();
     try {
@@ -2156,6 +2818,7 @@
     }
 
     elLoading.classList.add("hidden");
+    updateMuteBtn();
     state = "start";
     showModeSelect();
     elStart.hidden = false;
@@ -2210,6 +2873,20 @@
           makeHousePlatform("shelf", W * 0.78, fy - 150),
         ];
       },
+      showMap: () => { campaign = "adventure"; showAdventureMap(); },
+      startAdvLevel: (n, id) => {
+        campaign = "adventure";
+        mode = 1;
+        const list = allBuddies();
+        chosen.p1 = list.find((x) => x.id === id) || list.find((x) => isCharUnlocked(x.id)) || list[0];
+        chosen.p2 = null;
+        startAdventureLevel((n || 1) - 1);
+      },
+      winLevel: () => levelComplete(),
+      failLevel: () => showLevelEnd(false),
+      showVictory: () => showVictory(),
+      seedMap: () => { seedAdvShot(); showAdventureMap(); },
+      getSave: () => advSave,
       startHouseYard: (id) => {
         campaign = "house";
         mode = 1;

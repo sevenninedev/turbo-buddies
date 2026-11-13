@@ -30,8 +30,10 @@
 
   <div id="start" class="screen">
     <h1>Turbo Buddies</h1>
-    <p class="tagline" id="tagline">Fly &amp; dodge — pick a mode!</p>
+    <p class="tagline" id="tagline">A buddy adventure!</p>
     <div id="modes" class="modes">
+      <button type="button" id="modeAdventure" class="mode-btn mode-adventure">Adventure</button>
+      <p class="free-play-label">Free Play</p>
       <button type="button" id="mode1" class="mode-btn">1 Player</button>
       <button type="button" id="mode2" class="mode-btn mode-2p">2 Players</button>
       <button type="button" id="modeHouse" class="mode-btn mode-house">The Big House</button>
@@ -56,6 +58,35 @@
       <button id="change" type="button" class="secondary">Change buddy</button>
     </div>
   </div>
+
+  <button type="button" id="btn-mute" class="mute-btn" aria-label="Mute">🔊</button>
+
+  <div id="map-ui" hidden>
+    <h2 id="map-title">Adventure</h2>
+    <button type="button" id="map-back" class="text-back">← Title</button>
+  </div>
+
+  <div id="level-end" class="screen" hidden>
+    <div class="panel">
+      <h2 id="level-end-title">Level Complete!</h2>
+      <div id="level-stars" class="star-row"></div>
+      <p id="level-end-msg" class="level-end-msg"></p>
+      <button id="btn-next" type="button">Next</button>
+      <button id="btn-retry" type="button">Retry</button>
+      <button id="btn-map" type="button" class="secondary">Map</button>
+    </div>
+  </div>
+
+  <div id="victory" class="screen" hidden>
+    <div class="panel victory-panel">
+      <h2>You did it!</h2>
+      <p class="level-end-msg">Adventure Complete!</p>
+      <button id="btn-victory-map" type="button">Map</button>
+      <button id="btn-victory-title" type="button" class="secondary">Title</button>
+    </div>
+  </div>
+
+  <div id="unlock-pop" hidden>Unlocked!</div>
 
   <div id="loading">Loading buddies…</div>
 

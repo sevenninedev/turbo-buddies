@@ -199,6 +199,7 @@ h1 {
 }
 .mode-btn.mode-2p { background: #ffef57; }
 .mode-btn.mode-house { background: #ffb347; color: #3a2100; }
+.mode-btn.mode-chase { background: #7ad7ff; color: #0a3050; }
 .mode-btn.mode-adventure {
   font-size: 36px;
   padding: 22px 16px;

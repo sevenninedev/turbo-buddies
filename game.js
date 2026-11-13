@@ -26,9 +26,16 @@
     ghostSmall: "assets/ghost_small.png",
   };
   const houseEnemyImgs = {};
-  let campaign = "classic"; // classic | house | adventure
+  const CHASE_CHARS = [
+    { id: "money", name: "Money", src: "assets/money_guy.png" },
+    { id: "skater", name: "Skater", src: "assets/skater.png" },
+  ];
+  let tickle2Img = null;
+  let spinnerImg = null;
+  let skaterImg = null;
+  let campaign = "classic"; // classic | house | adventure | chase
   let skipNextIntro = false;
-  let levelKind = "sky"; // sky | yard | house | boss
+  let levelKind = "sky"; // sky | yard | house | boss | chase
   let adventureLevel = 0; // 0-based
   let pendingLevel = 0;
   let muted = false;
@@ -43,23 +50,28 @@
     { name: "Living Room", kind: "house", goalDist: 4000, spawnScale: 1 },
     { name: "Hallway", kind: "house", goalDist: 5200, spawnScale: 1.3 },
     { name: "Eye Boss", kind: "boss" },
+    { name: "The Big Chase", kind: "chase", goalDist: 5200, spawnScale: 1.1 },
   ];
   const START_CHARS = ["frog", "ape", "gorilla"];
-  const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike" };
+  const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike", 6: "money", 7: "skater" };
 
   let advSave = loadAdv();
   muted = !!advSave.muted;
 
-  function allBuddies() { return CHARS.concat(HOUSE_CHARS); }
+  function allBuddies() { return CHARS.concat(HOUSE_CHARS, CHASE_CHARS); }
   function roster() {
     if (campaign === "house") return HOUSE_CHARS;
+    if (campaign === "chase") return CHASE_CHARS;
     if (campaign === "adventure") return allBuddies();
     return CHARS;
   }
   function bestKey() { return campaign === "house" ? HOUSE_BEST_KEY : BEST_KEY; }
 
+  function isChaseMode() {
+    return campaign === "chase" || (campaign === "adventure" && levelKind === "chase");
+  }
   function isGroundMode() {
-    return campaign === "house" || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
+    return campaign === "house" || isChaseMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
   }
   function isYardMode() {
     return campaign === "house" || (campaign === "adventure" && levelKind === "yard");
@@ -69,7 +81,7 @@
   }
 
   function defaultAdv() {
-    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
+    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
   }
   function loadAdv() {
     try {
@@ -77,9 +89,17 @@
       if (!raw) return defaultAdv();
       const d = JSON.parse(raw);
       const base = defaultAdv();
-      if (!Array.isArray(d.stars) || d.stars.length !== 7) d.stars = base.stars;
+      if (!Array.isArray(d.stars)) d.stars = base.stars;
+      else if (d.stars.length === 7) d.stars = d.stars.concat([0]);
+      else if (d.stars.length !== 8) d.stars = base.stars;
       if (!Array.isArray(d.chars) || !d.chars.length) d.chars = base.chars;
-      d.unlockedThrough = Math.max(1, Math.min(7, d.unlockedThrough || 1));
+      d.unlockedThrough = Math.max(1, Math.min(8, d.unlockedThrough || 1));
+      // already beat the old final boss? unlock the new chase level and Money
+      if ((d.stars[6] || 0) > 0) {
+        d.unlockedThrough = Math.max(d.unlockedThrough, 8);
+        if (d.chars.indexOf("money") === -1) d.chars.push("money");
+      }
+      if ((d.stars[7] || 0) > 0 && d.chars.indexOf("skater") === -1) d.chars.push("skater");
       return d;
     } catch (e) { return defaultAdv(); }
   }
@@ -273,6 +293,14 @@
 
   function placePlayers() {
     const list = world.players;
+    if (isChaseMode()) {
+      if (list.length === 1) list[0].x = clamp(W * 0.58, 170, 240);
+      else if (list.length >= 2) {
+        list[0].x = clamp(W * 0.50, 150, 210);
+        list[1].x = clamp(W * 0.68, 200, 260);
+      }
+      return;
+    }
     if (list.length === 1) {
       list[0].x = clamp(W * 0.28, 80, 140);
     } else if (list.length >= 2) {
@@ -345,6 +373,8 @@
         : '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
     } else if (campaign === "adventure" && levelKind === "boss") {
       elHint.textContent = "JUMP ON THE EYE!";
+    } else if (isChaseMode()) {
+      elHint.textContent = "TAP TO JUMP! Get away!";
     } else if (isGroundMode()) {
       elHint.textContent = "TAP TO JUMP! Stomp baddies on the head!";
     } else {
@@ -373,6 +403,8 @@
       world.spawnT = 0.8;
       if (campaign === "adventure" && levelKind === "boss") {
         setupBossLevel();
+      } else if (isChaseMode()) {
+        setupChase();
       } else if (!world.platforms.length) {
         const fy = houseFloorTop();
         world.platforms.push(makeHousePlatform("sofa", W * 0.58, fy - 44));
@@ -501,7 +533,7 @@
     }
     if (mode === 1) {
       let mid = p1 ? '<div class="pscore">' + p1.score + "</div>" : "";
-      if (campaign === "adventure" && world.goalDist && p1) {
+      if ((campaign === "adventure" || isChaseMode()) && world.goalDist && p1) {
         const pct = Math.max(0, Math.min(100, (world.dist / world.goalDist) * 100));
         mid += '<div class="adv-progress"><div class="bar-bg"><div class="bar-fg" style="width:' + pct + '%"></div></div></div>';
       }
@@ -528,6 +560,10 @@
     p.lives -= 1;
     p.invuln = 1.6;
     world.shake = 12;
+    if (isChaseMode()) {
+      world.chaseGap = Math.max(36, (world.chaseGap || 100) - 48);
+      world.chaseHitT = 0.9;
+    }
     updateHud();
     sfxHit();
     if (p.lives <= 0) {
@@ -540,6 +576,7 @@
   }
 
   function spawnWave() {
+    if (isChaseMode()) { spawnChaseWave(); return; }
     if (isGroundMode()) { if (!world.bossMode) spawnHouseWave(); return; }
     const sample = world.players[0] || makePlayer(1, CHARS[0], 0);
     const { drawH } = playerSize(sample);
@@ -929,13 +966,20 @@
     world.spawnT -= dt;
     const interval = Math.max(0.95, 1.9 - world.dist / 7000) / (world.spawnScale || 1);
     if (world.spawnT <= 0) {
-      spawnHouseWave();
+      if (isChaseMode()) spawnChaseWave();
+      else spawnHouseWave();
       world.spawnT = interval;
     }
+    if (isChaseMode()) { updateChasers(dt); scrollDecor(dt, world.speed); }
 
     for (const o of world.obstacles) {
       o.x -= sp + (o.walk || 0) * dt;
       if (o.float && o.baseY != null) o.y = o.baseY + Math.sin(world.time * 2.2 + (o.bob || 0)) * 14;
+      if (o.kind === "spinner") {
+        o.rot = (o.rot || 0) + dt * 8;
+        if (o.spinPop > 0) o.spinPop -= dt;
+        o.y = (o.baseY != null ? o.baseY : o.y) + Math.sin(world.time * 6 + (o.bob || 0)) * 6;
+      }
       if (o.flash > 0) o.flash -= dt;
     }
     for (const s of world.stars) s.x -= sp;
@@ -950,6 +994,16 @@
         const hbY = p.y + drawH * 0.06, hbX = p.x;
         if (!o.passed && o.x + o.r < hbX - 40) anyonePassed = true;
         if (p.ghost) continue;
+        if (o.kind === "spinner" && isStomp(p, o, drawW, drawH)) {
+          p.vy = -500;
+          p.invuln = Math.max(p.invuln || 0, 0.2);
+          o.spinPop = 0.35;
+          addScore(p, 15, o.x, o.y);
+          world.popups.push({ x: o.x, y: o.y - 24, t: 0, text: "SPIN!", color: "#ffef57" });
+          sfxStomp();
+          burst(o.x, o.y);
+          continue;
+        }
         if (isHouseBaddie(o) && isStomp(p, o, drawW, drawH)) {
           stompEnemy(p, o);
           continue;
@@ -995,6 +1049,189 @@
       pop.y -= 50 * dt;
     }
     world.popups = world.popups.filter((pop) => pop.t < 0.7);
+  }
+
+
+  function setupChase() {
+    world.platforms = [];
+    world.chaseGap = 100;
+    world.chaseHitT = 0;
+    if (!world.goalDist) world.goalDist = 4800;
+    const fy = houseFloorTop();
+    for (const p of world.players) standOnFloor(p, fy);
+    placePlayers();
+    if (world.players[0]) world.players[0].x = clamp(W * 0.58, 170, 240);
+  }
+
+  function spawnChaseWave() {
+    const fy = houseFloorTop();
+    const roll = Math.random();
+    if (roll < 0.22 && spinnerImg) {
+      const r = 48;
+      const en = {
+        x: W + 110, y: fy - r * 0.7, r: r, kind: "spinner",
+        rot: 0, passed: false, bob: rand(0, 8), baseY: fy - r * 0.7, spinPop: 0,
+      };
+      world.obstacles.push(en);
+    } else {
+      const kind = Math.random() < 0.55 ? "spike" : "rock";
+      const r = kind === "spike" ? rand(26, 36) : rand(28, 40);
+      const mid = Math.random() < 0.22;
+      const y = mid ? fy - rand(90, 140) : fy - r * 0.78;
+      world.obstacles.push(makeObstacle(W + 90, y, kind));
+    }
+    // coins / money
+    const n = Math.random() < 0.7 ? (Math.random() < 0.45 ? 2 : 1) : 0;
+    for (let i = 0; i < n; i++) {
+      world.stars.push({
+        x: W + rand(130, 250) + i * 36,
+        y: fy - rand(40, 150),
+        r: 16, rot: rand(0, 6), coin: true,
+      });
+    }
+  }
+
+  function updateChasers(dt) {
+    if (world.chaseGap == null) world.chaseGap = 100;
+    world.chaseHitT = Math.max(0, (world.chaseHitT || 0) - dt);
+    if (world.chaseHitT <= 0) {
+      world.chaseGap = Math.min(120, world.chaseGap + 14 * dt);
+    }
+    // sparkle trail from the skater
+    const p = world.players[0];
+    if (!p) return;
+    if (Math.random() < 0.9) {
+      const sx = p.x - world.chaseGap + 10;
+      const fy = houseFloorTop();
+      world.particles.push({
+        x: sx + rand(-8, 16),
+        y: p.y + 20 + rand(-8, 10),
+        vx: rand(-80, -20),
+        vy: rand(-20, 20),
+        t: 0, life: rand(0.2, 0.4), r: rand(4, 9),
+        kind: "flame", color: "#5ad0ff",
+      });
+    }
+  }
+
+  function drawChaseScene() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#8fd8ff");
+    g.addColorStop(0.45, "#c8f0ff");
+    g.addColorStop(0.62, "#fff4b8");
+    g.addColorStop(1, "#7ed957");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    // sun
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath();
+    ctx.arc(W - 64, 78, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,220,0.35)";
+    ctx.beginPath();
+    ctx.arc(W - 64, 78, 54, 0, Math.PI * 2);
+    ctx.fill();
+    for (const c of world.clouds) drawPuff(c.x, Math.min(c.y, H * 0.42), 46 * c.s, `rgba(255,255,255,${0.7 + c.z * 0.2})`);
+    // speed lines
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    const fy = houseFloorTop();
+    for (let i = 0; i < 10; i++) {
+      const y = 90 + ((i * 47 + world.dist * 0.4) % (fy - 120));
+      const x2 = W * 0.92 - ((world.dist * 1.8 + i * 80) % (W * 0.7));
+      ctx.beginPath();
+      ctx.moveTo(x2 - 50, y);
+      ctx.lineTo(x2, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // hills
+    ctx.fillStyle = "#5fc14a";
+    ctx.beginPath();
+    ctx.ellipse(W * 0.15, fy + 30, 180, 70, 0, Math.PI, 0);
+    ctx.ellipse(W * 0.7, fy + 20, 200, 80, 0, Math.PI, 0);
+    ctx.fill();
+    // grass floor
+    ctx.fillStyle = "#5dbe3a";
+    ctx.fillRect(-20, fy, W + 40, H - fy + 40);
+    ctx.fillStyle = "#79d85a";
+    ctx.fillRect(-20, fy, W + 40, 16);
+    // dashed ground line
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.45)";
+    ctx.lineWidth = 4;
+    ctx.setLineDash([16, 14]);
+    ctx.lineDashOffset = -world.dist * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-20, fy + 28);
+    ctx.lineTo(W + 20, fy + 28);
+    ctx.stroke();
+    ctx.restore();
+    scrollDecor(0, 0); // no-op if already scrolled in update; keep clouds drawn
+  }
+
+  function drawChasers() {
+    const p = world.players[0];
+    if (!p) return;
+    const gap = world.chaseGap || 170;
+    const fy = houseFloorTop();
+    const shake = world.chaseHitT > 0 ? Math.sin(world.time * 30) * 3 : 0;
+    // skater
+    const sx = p.x - gap + shake;
+    const sy = fy - 8;
+    const imgS = skaterImg || (CHASE_CHARS[1] && CHASE_CHARS[1].image);
+    if (imgS) {
+      const drawH = 92;
+      const drawW = (imgS.width / imgS.height) * drawH;
+      // glow trail
+      const glow = ctx.createLinearGradient(sx - 70, sy, sx, sy);
+      glow.addColorStop(0, "rgba(80,180,255,0)");
+      glow.addColorStop(1, "rgba(80,200,255,0.45)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.ellipse(sx - 10, p.y + 28, 70, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(imgS, sx - drawW * 0.55, p.y - drawH * 0.15, drawW, drawH);
+    }
+    // tickle hand a bit further back and lower
+    const tx = p.x - gap - 70 + Math.sin(world.time * 8) * 6;
+    const ty = p.y + 8 + Math.sin(world.time * 5) * 8;
+    const imgT = tickle2Img;
+    if (imgT) {
+      const drawH = 84;
+      const drawW = (imgT.width / imgT.height) * drawH;
+      ctx.drawImage(imgT, tx - drawW * 0.5, ty - drawH * 0.4, drawW, drawH);
+    }
+  }
+
+  function drawSpinner(o) {
+    const img = spinnerImg;
+    const pop = o.spinPop > 0 ? 1 + o.spinPop * 0.4 : 1;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(o.rot || 0);
+    ctx.scale(pop, pop);
+    // red disc glow
+    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, o.r * 1.4);
+    g.addColorStop(0, "rgba(255,80,70,0.5)");
+    g.addColorStop(1, "rgba(255,80,70,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, o.r * 1.4, 0, Math.PI * 2);
+    ctx.fill();
+    if (img) {
+      const drawH = o.r * 2.2;
+      const drawW = (img.width / img.height) * drawH;
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    } else {
+      ctx.fillStyle = "#e23b3b";
+      ctx.beginPath();
+      ctx.arc(0, 0, o.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   function spawnTickle(x, y) {
@@ -1124,7 +1361,7 @@
 
   // Generous top hitbox so a 7-year-old can stomp: falling + feet on/above the baddie.
   function isStomp(p, o, drawW, drawH) {
-    if (!isHouseBaddie(o) || p.ghost) return false;
+    if ((!isHouseBaddie(o) && o.kind !== "spinner") || p.ghost) return false;
     if (p.vy <= 20) return false;
     const feetY = p.y + drawH * 0.48;
     const top = o.y - o.r * 1.35;
@@ -1194,6 +1431,8 @@
     }
     if (state === "yard" || state === "intro") {
       drawHouseOutside();
+    } else if (isChaseMode()) {
+      drawChaseScene();
     } else if (isGroundMode()) {
       drawHouseInside();
     } else {
@@ -1243,6 +1482,7 @@
       for (const st of world.stars) if (!st.got) drawStar(st);
       for (const part of world.particles) drawParticle(part);
       if (isSkyMode()) for (const tk of world.tickles) drawTickle(tk);
+      if (isChaseMode()) drawChasers();
       for (const plr of world.players) drawPlayer(plr);
       for (const pop of world.popups) {
         ctx.save();
@@ -1812,6 +2052,10 @@
       drawHouseEnemy(o);
       return;
     }
+    if (o.kind === "spinner") {
+      drawSpinner(o);
+      return;
+    }
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
@@ -1907,6 +2151,26 @@
     ctx.translate(s.x, s.y);
     ctx.rotate(s.rot);
     const r = s.r;
+    if (s.coin) {
+      const g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, 2, 0, 0, r);
+      g.addColorStop(0, "#fff6b0");
+      g.addColorStop(0.45, "#ffd24a");
+      g.addColorStop(1, "#c98900");
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#8a5a00";
+      ctx.stroke();
+      ctx.fillStyle = "#8a5a00";
+      ctx.font = "800 " + Math.round(r * 1.15) + "px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("$", 0, 1);
+      ctx.restore();
+      return;
+    }
     if (s.candy) {
       ctx.fillStyle = "#ff4d8a";
       ctx.beginPath();
@@ -2148,6 +2412,7 @@
     if (campaign === "adventure") { showAdventureMap(); return; }
     const wasHouse = campaign === "house";
     if (wasHouse) showHousePlayers();
+    else if (campaign === "chase") showChasePick();
     else showModeSelect();
     elOver.hidden = true;
     elHud.hidden = true;
@@ -2165,6 +2430,8 @@
     elPrompt.hidden = true;
     elBack.hidden = true;
     document.getElementById("modeHouse").hidden = false;
+    const chaseBtn = document.getElementById("modeChase");
+    if (chaseBtn) chaseBtn.hidden = false;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = false;
     const free = document.querySelector(".free-play-label");
@@ -2182,11 +2449,36 @@
     elPrompt.hidden = true;
     elBack.hidden = false;
     document.getElementById("modeHouse").hidden = true;
+    const chaseBtn = document.getElementById("modeChase");
+    if (chaseBtn) chaseBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
     if (free) free.hidden = true;
     elTagline.textContent = "The Big House — 1 or 2 players?";
+  }
+
+  function showChasePick() {
+    campaign = "chase";
+    mode = 1;
+    pickStep = "p1";
+    chosen = { p1: null, p2: null };
+    elModes.hidden = true;
+    elCards.hidden = false;
+    elPrompt.hidden = false;
+    elBack.hidden = false;
+    document.getElementById("modeHouse").hidden = true;
+    const chaseBtn = document.getElementById("modeChase");
+    if (chaseBtn) chaseBtn.hidden = true;
+    const advBtn = document.getElementById("modeAdventure");
+    if (advBtn) advBtn.hidden = true;
+    const free = document.querySelector(".free-play-label");
+    if (free) free.hidden = true;
+    elTagline.textContent = "The Big Chase — pick a buddy!";
+    elPrompt.textContent = "Pick your buddy!";
+    elPrompt.className = "pick-prompt";
+    renderCards();
+    refreshCards();
   }
 
   function showPick(step) {
@@ -2201,6 +2493,8 @@
       elTagline.textContent = lv.name + " — pick a buddy!";
     } else if (campaign === "house") {
       elTagline.textContent = "The Big House — pick a hero!";
+    } else if (campaign === "chase") {
+      elTagline.textContent = "The Big Chase — pick a buddy!";
     } else {
       elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
     }
@@ -2266,19 +2560,23 @@
 
   document.getElementById("mode1").addEventListener("click", () => {
     ensureAudio();
-    if (pickStep !== "house-players") campaign = "classic";
+    if (pickStep !== "house-players" && pickStep !== "chase-players") campaign = "classic";
     mode = 1;
     showPick("p1");
   });
   document.getElementById("mode2").addEventListener("click", () => {
     ensureAudio();
-    if (pickStep !== "house-players") campaign = "classic";
+    if (pickStep !== "house-players" && pickStep !== "chase-players") campaign = "classic";
     mode = 2;
     showPick("p1");
   });
   document.getElementById("modeHouse").addEventListener("click", () => {
     ensureAudio();
     showHousePlayers();
+  });
+  document.getElementById("modeChase").addEventListener("click", () => {
+    ensureAudio();
+    showChasePick();
   });
   document.getElementById("modeAdventure").addEventListener("click", () => {
     ensureAudio();
@@ -2389,18 +2687,36 @@
   }
 
   function maybeCompleteLevel() {
-    if (campaign !== "adventure" || world.levelDone || world.bossMode) return;
-    if (!world.goalDist) return;
-    if (world.dist >= world.goalDist) levelComplete();
+    if (world.levelDone) return;
+    if (!world.goalDist || world.dist < world.goalDist) return;
+    if (campaign === "adventure") {
+      if (world.bossMode) return;
+      levelComplete();
+      return;
+    }
+    if (isChaseMode()) chaseFreeWin();
+  }
+
+  function chaseFreeWin() {
+    world.levelDone = true;
+    state = "over";
+    world.players.forEach((p) => { p.boosting = false; });
+    pointers.clear();
+    elHint.hidden = true;
+    elOver.hidden = false;
+    const s = world.players[0] ? world.players[0].score : 0;
+    const best = setBest(s);
+    elOverTitle.textContent = "You got away!";
+    elOver1p.hidden = false;
+    elOver2p.hidden = true;
+    document.getElementById("over-score").textContent = String(s);
+    document.getElementById("over-best").textContent = String(best);
+    sfxWin();
   }
 
   function levelComplete() {
     if (world.levelDone) return;
     world.levelDone = true;
-    if (campaign === "adventure" && levelKind === "boss") {
-      showVictory();
-      return;
-    }
     showLevelEnd(true);
   }
 
@@ -2424,7 +2740,7 @@
       const prev = advSave.stars[adventureLevel] || 0;
       advSave.stars[adventureLevel] = Math.max(prev, stars);
       if (advSave.unlockedThrough < adventureLevel + 2) {
-        advSave.unlockedThrough = Math.min(7, adventureLevel + 2);
+        advSave.unlockedThrough = Math.min(8, adventureLevel + 2);
       }
       const rewardId = UNLOCK_BY_LEVEL[adventureLevel];
       if (rewardId && advSave.chars.indexOf(rewardId) === -1) {
@@ -2479,6 +2795,9 @@
     campaign = "adventure";
     mode = 1;
     pickStep = "adv-pick";
+    if (ADV_LEVELS[index] && ADV_LEVELS[index].kind === "chase" && isCharUnlocked("money")) {
+      chosen.p1 = allBuddies().find((c) => c.id === "money") || chosen.p1;
+    }
     if (!chosen.p1 || !isCharUnlocked(chosen.p1.id)) {
       chosen.p1 = allBuddies().find((c) => isCharUnlocked(c.id)) || CHARS[0];
     }
@@ -2545,15 +2864,16 @@
     ctx.fillStyle = "#3a7bdd";
     ctx.fillRect(hx - 6, hy + 18, 12, 18);
 
-    // winding path of 7 nodes
+    // winding path of 8 nodes
     const nodes = [
-      { x: 0.22, y: 0.86 },
-      { x: 0.68, y: 0.78 },
-      { x: 0.30, y: 0.66 },
-      { x: 0.70, y: 0.54 },
-      { x: 0.28, y: 0.44 },
-      { x: 0.66, y: 0.34 },
-      { x: 0.42, y: 0.22 },
+      { x: 0.22, y: 0.88 },
+      { x: 0.70, y: 0.80 },
+      { x: 0.28, y: 0.70 },
+      { x: 0.72, y: 0.58 },
+      { x: 0.26, y: 0.48 },
+      { x: 0.68, y: 0.38 },
+      { x: 0.30, y: 0.28 },
+      { x: 0.64, y: 0.18 },
     ];
     const pts = nodes.map((n) => ({ x: n.x * W, y: n.y * H }));
     ctx.lineWidth = 18;
@@ -2569,17 +2889,17 @@
     ctx.stroke();
 
     mapHits = [];
-    const current = Math.min(advSave.unlockedThrough - 1, 6);
+    const current = Math.min(advSave.unlockedThrough - 1, ADV_LEVELS.length - 1);
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i];
       const lv = ADV_LEVELS[i];
       const unlocked = i + 1 <= advSave.unlockedThrough;
       const stars = advSave.stars[i] || 0;
-      const isCurrent = unlocked && i === current && stars === 0 || (unlocked && i === Math.min(advSave.unlockedThrough - 1, 6) && i === current);
+      const isCurrent = unlocked && i === current;
       const pulse = (unlocked && i === advSave.unlockedThrough - 1) ? 1 + Math.sin(world.time * 4) * 0.08 : 1;
       const r = 28 * pulse;
       ctx.beginPath();
-      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
+      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
       ctx.strokeStyle = "#16324a";
       ctx.lineWidth = 4;
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -2688,19 +3008,14 @@
     }
     if (world.bossDefeated) {
       world.bossDefeatT = (world.bossDefeatT || 0) + dt;
-      if (world.bossDefeatT > 0.85) showVictory();
+      if (world.bossDefeatT > 0.85) levelComplete();
     }
   }
 
   function showVictory() {
     if (state === "victory") return;
     world.levelDone = true;
-    if (advSave.unlockedThrough < 7) advSave.unlockedThrough = 7;
-    // three stars on boss if they won with lives
-    if (world.players[0]) {
-      const stars = clamp(Math.max(1, world.players[0].lives), 1, 3);
-      advSave.stars[6] = Math.max(advSave.stars[6] || 0, stars);
-    }
+    if (advSave.unlockedThrough < 8) advSave.unlockedThrough = 8;
     writeAdv();
     state = "victory";
     world.players.forEach((p) => { p.boosting = false; });
@@ -2792,7 +3107,7 @@
 
   function seedAdvShot() {
     advSave.unlockedThrough = 5;
-    advSave.stars = [3, 2, 3, 1, 0, 0, 0];
+    advSave.stars = [3, 2, 3, 1, 0, 0, 0, 0];
     advSave.chars = START_CHARS.concat(["yellow", "elk", "cg", "cap"]);
   }
 
@@ -2806,11 +3121,17 @@
         loadImage(HOUSE_ENEMY_SRCS[k]).then((img) => { houseEnemyImgs[k] = img; })
       );
       const houseChars = HOUSE_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
+      const chaseChars = CHASE_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
+      const chasePs = [
+        loadImage("assets/tickle_hand2.png").then((img) => { tickle2Img = img; }),
+        loadImage("assets/spinner_guy.png").then((img) => { spinnerImg = img; }),
+        loadImage("assets/skater.png").then((img) => { skaterImg = img; }),
+      ];
       await Promise.all(CHARS.map(async (c) => {
         c.image = await loadImage(c.src);
         if (c.flame) c.flameImg = await loadImage(c.flame);
         if (c.thumb) c.thumbImg = await loadImage(c.thumb);
-      }).concat([tickleP]).concat(housePs).concat(houseChars));
+      }).concat([tickleP]).concat(housePs).concat(houseChars).concat(chaseChars).concat(chasePs));
     } catch (err) {
       elLoading.textContent = "Could not load pictures. Try refreshing.";
       console.error(err);
@@ -2887,6 +3208,15 @@
       showVictory: () => showVictory(),
       seedMap: () => { seedAdvShot(); showAdventureMap(); },
       getSave: () => advSave,
+      startChase: (id) => {
+        campaign = "chase";
+        mode = 1;
+        chosen.p1 = CHASE_CHARS.find((x) => x.id === id) || CHASE_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = true;
+        startGame();
+        if (world.players[0]) world.players[0].invuln = 0;
+      },
       startHouseYard: (id) => {
         campaign = "house";
         mode = 1;

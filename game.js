@@ -18,7 +18,7 @@
   const HOUSE_BEST_KEY = "turboBuddiesHouseBest";
   const HOUSE_CHARS = [
     { id: "cap", name: "Cap", src: "assets/cap_guy.png" },
-    { id: "crown", name: "Crown", src: "assets/crown_guy.png" },
+    { id: "spike", name: "Spike", src: "assets/crown_guy.png" },
   ];
   const HOUSE_ENEMY_SRCS = {
     eye: "assets/eye_monster.png",
@@ -116,6 +116,14 @@
     beep(1320, 0.12, "square", 0.06, 0.07);
   }
   function sfxHit() { beep(180, 0.22, "triangle", 0.12, 0, 70); }
+  function sfxStomp() {
+    beep(320, 0.08, "square", 0.08, 0, 520);
+    beep(520, 0.1, "sine", 0.06, 0.04, 880);
+  }
+  function sfxPoof() {
+    beep(200, 0.16, "triangle", 0.1, 0, 90);
+    beep(700, 0.18, "sine", 0.07, 0.05, 1400);
+  }
   function sfxOver() {
     beep(392, 0.18, "square", 0.08, 0);
     beep(311, 0.18, "square", 0.08, 0.16);
@@ -243,7 +251,7 @@
     if (mode === 2) {
       elHint.innerHTML = '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
     } else {
-      elHint.textContent = campaign === "house" ? "HOLD TO FLY! Flashlight zaps baddies!" : "HOLD TO FLY!";
+      elHint.textContent = campaign === "house" ? "HOLD TO FLY! Stomp baddies on the head!" : "HOLD TO FLY!";
     }
     updateHud();
     if (campaign === "house" && !skipNextIntro) {
@@ -405,15 +413,25 @@
     return { x, y, r, kind, rot: rand(-0.3, 0.3), passed: false };
   }
 
+  function isHouseBaddie(o) {
+    return o.kind === "eye" || o.kind === "ghostBig" || o.kind === "ghostSmall";
+  }
+
+  function makeHouseEnemy(kind, x, y) {
+    const r = kind === "eye" ? 50 : kind === "ghostBig" ? 46 : 34;
+    const maxHp = kind === "eye" ? 10 : 1;
+    return {
+      x, y, r, kind, rot: 0, passed: false, bob: rand(0, 8),
+      hp: maxHp, maxHp, flash: 0, dead: false,
+    };
+  }
+
   function spawnHouseWave() {
     const kinds = ["ghostSmall", "ghostSmall", "ghostBig", "eye"];
     const kind = kinds[(Math.random() * kinds.length) | 0];
     const margin = 80;
     const y = rand(margin, H - margin);
-    const r = kind === "eye" ? 50 : kind === "ghostBig" ? 46 : 34;
-    world.obstacles.push({
-      x: W + 80, y, r, kind, rot: 0, passed: false, bob: rand(0, 8),
-    });
+    world.obstacles.push(makeHouseEnemy(kind, W + 80, y));
     const sy = clamp(y + rand(-170, 170), margin, H - margin);
     world.stars.push({ x: W + 110, y: sy, r: 18, rot: rand(0, 6), candy: true });
   }
@@ -443,15 +461,34 @@
       for (const o of world.obstacles) {
         if (o.zapped || o.x < beamX0 || o.x > beamX1) continue;
         if (Math.abs(o.y - beamY) < 70 + o.r * 0.4) {
-          o.zapped = true;
-          o.passed = true;
-          addScore(p, 15, o.x, o.y);
-          world.popups.push({ x: o.x, y: o.y - 20, t: 0, text: "ZAP!", color: "#ffe566" });
-          burst(o.x, o.y);
+          if (o.kind === "eye") {
+            if (o.hp == null) { o.hp = 10; o.maxHp = 10; }
+            o.hp = Math.max(0, o.hp - 2);
+            o.flash = 0.28;
+            if (o.hp <= 0) {
+              o.dead = true;
+              o.passed = true;
+              o.zapped = true;
+              addScore(p, 50, o.x, o.y);
+              world.popups.push({ x: o.x, y: o.y - 28, t: 0, text: "POOF!", color: "#ffe566" });
+              bigPoof(o.x, o.y);
+              sfxPoof();
+            } else {
+              addScore(p, 10, o.x, o.y);
+              world.popups.push({ x: o.x, y: o.y - 20, t: 0, text: "ZAP!", color: "#ffe566" });
+              burst(o.x, o.y);
+            }
+          } else {
+            o.zapped = true;
+            o.passed = true;
+            addScore(p, 15, o.x, o.y);
+            world.popups.push({ x: o.x, y: o.y - 20, t: 0, text: "ZAP!", color: "#ffe566" });
+            burst(o.x, o.y);
+          }
         }
       }
     }
-    world.obstacles = world.obstacles.filter((o) => !o.zapped);
+    world.obstacles = world.obstacles.filter((o) => !o.zapped && !o.dead);
   }
 
   function update(dt) {
@@ -530,6 +567,7 @@
     } else {
       for (const o of world.obstacles) {
         if (o.bob != null) o.y += Math.sin(world.time * 2.2 + o.bob) * 28 * dt;
+        if (o.flash > 0) o.flash -= dt;
       }
       world.flashT -= dt;
       if (world.flashAge > 0) world.flashAge -= dt;
@@ -540,7 +578,7 @@
     }
 
     for (const o of world.obstacles) {
-      if (o.x < -80) continue;
+      if (o.x < -80 || o.dead) continue;
       let anyonePassed = false;
       for (const p of world.players) {
         const { drawW, drawH } = playerSize(p);
@@ -548,15 +586,19 @@
         const hbY = p.y + drawH * 0.06, hbX = p.x;
         if (!o.passed && o.x + o.r < hbX - 40) anyonePassed = true;
         if (p.ghost) continue;
+        if (campaign === "house" && isHouseBaddie(o) && isStomp(p, o, drawW, drawH)) {
+          stompEnemy(p, o);
+          continue;
+        }
         const or = o.r * (o.kind === "cloud" ? 0.72 : 0.78);
         if (ellipseHit(hbX, hbY, hbW, hbH, o.x, o.y, or, or)) hitPlayer(p);
       }
-      if (anyonePassed && !o.passed) {
+      if (anyonePassed && !o.passed && !o.dead) {
         o.passed = true;
         for (const p of livingPlayers()) addScore(p, 1, o.x, o.y);
       }
     }
-    world.obstacles = world.obstacles.filter((o) => o.x > -120);
+    world.obstacles = world.obstacles.filter((o) => o.x > -120 && !o.dead);
 
     for (const s of world.stars) {
       if (s.got) continue;
@@ -700,6 +742,59 @@
     }
   }
 
+  function bigPoof(x, y) {
+    const colors = ["#ffe566", "#ff8ad4", "#7dff8a", "#7ad7ff", "#ffb347", "#ffffff"];
+    for (let i = 0; i < 28; i++) {
+      const a = (Math.PI * 2 * i) / 28 + rand(-0.2, 0.2);
+      const sp = rand(80, 240);
+      world.particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 40,
+        t: 0, life: rand(0.45, 0.8), r: rand(8, 18),
+        kind: "poof", color: colors[i % colors.length],
+      });
+    }
+  }
+
+  // Generous top hitbox so a 7-year-old can stomp: falling + feet on/above the baddie.
+  function isStomp(p, o, drawW, drawH) {
+    if (!isHouseBaddie(o) || p.ghost) return false;
+    if (p.vy <= 20) return false;
+    const feetY = p.y + drawH * 0.48;
+    const top = o.y - o.r * 1.35;
+    const mid = o.y + o.r * 0.35;
+    const halfW = o.r * 1.25 + drawW * 0.3;
+    return feetY >= top && feetY <= mid && Math.abs(p.x - o.x) < halfW;
+  }
+
+  function stompEnemy(p, o) {
+    p.vy = -440;
+    p.invuln = Math.max(p.invuln || 0, 0.22);
+    if (o.hp == null) o.hp = o.kind === "eye" ? 10 : 1;
+    o.hp -= 1;
+    o.flash = 0.28;
+    world.shake = Math.max(world.shake, o.kind === "eye" ? 10 : 6);
+    sfxStomp();
+    if (o.hp <= 0) {
+      o.dead = true;
+      o.passed = true;
+      if (o.kind === "eye") {
+        addScore(p, 50, o.x, o.y);
+        world.popups.push({ x: o.x, y: o.y - 28, t: 0, text: "POOF!", color: "#ffe566" });
+        bigPoof(o.x, o.y);
+        sfxPoof();
+      } else {
+        addScore(p, 15, o.x, o.y);
+        world.popups.push({ x: o.x, y: o.y - 20, t: 0, text: "STOMP!", color: "#7dff8a" });
+        burst(o.x, o.y);
+      }
+    } else {
+      addScore(p, 5, o.x, o.y);
+      world.popups.push({ x: o.x, y: o.y - 22, t: 0, text: "STOMP!", color: "#ffe566" });
+    }
+  }
+
   function scrollDecor(dt, speed) {
     for (const c of world.clouds) {
       c.x -= speed * c.z * dt;
@@ -785,141 +880,145 @@
 
   function drawHouseOutside() {
     const gy = houseGroundY();
-    // night sky
-    const g = ctx.createLinearGradient(0, 0, 0, gy);
-    g.addColorStop(0, "#14102a");
-    g.addColorStop(0.7, "#2a1a48");
-    g.addColorStop(1, "#3a2858");
-    ctx.fillStyle = g;
+    // sunny daytime sky
+    const sky = ctx.createLinearGradient(0, 0, 0, gy);
+    sky.addColorStop(0, "#6ec4ff");
+    sky.addColorStop(0.55, "#b8e8ff");
+    sky.addColorStop(1, "#eaf8ff");
+    ctx.fillStyle = sky;
     ctx.fillRect(-20, -20, W + 40, gy + 20);
-    // moon
-    ctx.fillStyle = "#f6f0c8";
+    // sun
+    ctx.fillStyle = "rgba(255, 220, 80, 0.4)";
     ctx.beginPath();
-    ctx.arc(W - 62, 64, 28, 0, Math.PI * 2);
+    ctx.arc(W - 58, 58, 46, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "rgba(255,255,210,0.18)";
+    ctx.fillStyle = "#ffe14a";
     ctx.beginPath();
-    ctx.arc(W - 62, 64, 48, 0, Math.PI * 2);
+    ctx.arc(W - 58, 58, 28, 0, Math.PI * 2);
     ctx.fill();
-    // GROUND — house sits on this, not in the sky
+    ctx.strokeStyle = "rgba(255, 200, 40, 0.55)";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI * 2 * i) / 8;
+      ctx.beginPath();
+      ctx.moveTo(W - 58 + Math.cos(a) * 36, 58 + Math.sin(a) * 36);
+      ctx.lineTo(W - 58 + Math.cos(a) * 50, 58 + Math.sin(a) * 50);
+      ctx.stroke();
+    }
+    // cheerful clouds
+    function puff(x, y, sc) {
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.beginPath();
+      ctx.arc(x, y, 16 * sc, 0, Math.PI * 2);
+      ctx.arc(x + 18 * sc, y - 8 * sc, 20 * sc, 0, Math.PI * 2);
+      ctx.arc(x + 36 * sc, y, 16 * sc, 0, Math.PI * 2);
+      ctx.arc(x + 18 * sc, y + 6 * sc, 14 * sc, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    puff(36, 72, 1.15);
+    puff(W * 0.36, 46, 0.85);
+    puff(W * 0.16, 130, 0.7);
+    // GROUND — house sits on this
     const grass = ctx.createLinearGradient(0, gy, 0, H);
-    grass.addColorStop(0, "#3d9a3a");
-    grass.addColorStop(0.4, "#2e7a32");
-    grass.addColorStop(1, "#1c4d20");
+    grass.addColorStop(0, "#7ad14a");
+    grass.addColorStop(0.45, "#4fb83a");
+    grass.addColorStop(1, "#2f8a28");
     ctx.fillStyle = grass;
     ctx.fillRect(-20, gy, W + 40, H - gy + 20);
-    // grass tufts along the ground line
-    ctx.fillStyle = "#4bb04a";
-    for (let i = 0; i < 18; i++) {
-      const gx = (i / 17) * W + Math.sin(i * 2.1) * 6;
+    ctx.fillStyle = "#8ee05a";
+    for (let i = 0; i < 20; i++) {
+      const gx = (i / 19) * W + Math.sin(i * 2.1) * 6;
       ctx.beginPath();
       ctx.moveTo(gx, gy + 2);
-      ctx.lineTo(gx - 4, gy - 10);
+      ctx.lineTo(gx - 4, gy - 11);
       ctx.lineTo(gx + 2, gy + 2);
-      ctx.lineTo(gx + 8, gy - 12);
+      ctx.lineTo(gx + 8, gy - 13);
       ctx.lineTo(gx + 4, gy + 2);
       ctx.fill();
     }
+    // little flowers
+    for (let i = 0; i < 7; i++) {
+      const fx = 18 + i * (W - 36) / 6 + Math.sin(i * 1.7) * 8;
+      const fy = gy + 22 + (i % 2) * 16;
+      ctx.fillStyle = ["#ff6b9a", "#ffd24a", "#ff8a4a", "#c86bff"][i % 4];
+      ctx.beginPath();
+      ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffe566";
+      ctx.beginPath();
+      ctx.arc(fx, fy, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
     // path up to the door (on the ground)
-    const doorW = Math.min(W * 0.82, 340) * 0.22;
+    const doorW = Math.min(W * 0.9, 370) * 0.2;
     ctx.beginPath();
-    ctx.moveTo(W * 0.22, H + 10);
-    ctx.lineTo(W * 0.78, H + 10);
+    ctx.moveTo(W * 0.18, H + 10);
+    ctx.lineTo(W * 0.82, H + 10);
     ctx.lineTo(W * 0.5 + doorW * 0.55, gy + 4);
     ctx.lineTo(W * 0.5 - doorW * 0.55, gy + 4);
     ctx.closePath();
     const pg = ctx.createLinearGradient(0, gy, 0, H);
-    pg.addColorStop(0, "#d2ae6e");
-    pg.addColorStop(1, "#9a7540");
+    pg.addColorStop(0, "#f0d18a");
+    pg.addColorStop(1, "#d2a05a");
     ctx.fillStyle = pg;
     ctx.fill();
-    ctx.strokeStyle = "#6a4a22";
+    ctx.strokeStyle = "#b07a30";
     ctx.lineWidth = 3;
     ctx.stroke();
-    drawSpookyHouse(gy, world.doorOpen || 0);
+    drawFriendlyHouse(gy, world.doorOpen || 0);
   }
 
-  function drawSpookyHouse(gy, doorOpen) {
-    const hw = Math.min(W * 0.82, 340);
-    const hh = H * 0.36;
+  function drawFriendlyHouse(gy, doorOpen) {
+    const hw = Math.min(W * 0.9, 370);
+    const hh = H * 0.46;
     const hx = (W - hw) / 2;
-    const base = gy; // sits ON the ground
-    const top = base - hh;
+    const base = gy;
+    const eaves = base - hh * 0.72;
+    const peak = base - hh;
     // chimney
-    ctx.fillStyle = "#3a2a48";
-    ctx.fillRect(hx + hw * 0.72, top + hh * 0.08, hw * 0.1, hh * 0.28);
-    ctx.fillStyle = "#2a1a30";
-    ctx.fillRect(hx + hw * 0.70, top + hh * 0.05, hw * 0.14, 10);
+    ctx.fillStyle = "#e07060";
+    ctx.fillRect(hx + hw * 0.74, peak + hh * 0.12, hw * 0.1, hh * 0.28);
+    ctx.fillStyle = "#d45848";
+    ctx.fillRect(hx + hw * 0.72, peak + hh * 0.1, hw * 0.14, 12);
+    // a little puff of friendly steam
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.beginPath();
+    ctx.arc(hx + hw * 0.79, peak + hh * 0.05, 7, 0, Math.PI * 2);
+    ctx.arc(hx + hw * 0.82, peak + hh * 0.0, 9, 0, Math.PI * 2);
+    ctx.arc(hx + hw * 0.85, peak + hh * 0.05, 6, 0, Math.PI * 2);
+    ctx.fill();
     // roof
     ctx.beginPath();
-    ctx.moveTo(hx - 14, top + hh * 0.32);
-    ctx.lineTo(hx + hw / 2, top - 8);
-    ctx.lineTo(hx + hw + 14, top + hh * 0.32);
+    ctx.moveTo(hx - 22, eaves + 8);
+    ctx.lineTo(hx + hw / 2, peak);
+    ctx.lineTo(hx + hw + 22, eaves + 8);
     ctx.closePath();
-    ctx.fillStyle = "#1a1028";
+    ctx.fillStyle = "#e23b3b";
     ctx.fill();
-    ctx.strokeStyle = "#0a0614";
+    ctx.strokeStyle = "#9a1c1c";
     ctx.lineWidth = 4;
     ctx.stroke();
-    // body
-    ctx.fillStyle = "#4a3270";
-    ctx.fillRect(hx, top + hh * 0.28, hw, hh * 0.72);
-    ctx.strokeStyle = "#1c1030";
+    // walls
+    ctx.fillStyle = "#ffe07a";
+    ctx.fillRect(hx, eaves, hw, base - eaves);
+    ctx.strokeStyle = "#d0a430";
     ctx.lineWidth = 4;
-    ctx.strokeRect(hx, top + hh * 0.28, hw, hh * 0.72);
+    ctx.strokeRect(hx, eaves, hw, base - eaves);
+    // mid-floor trim
+    const midY = eaves + (base - eaves) * 0.46;
+    ctx.fillStyle = "#f0c850";
+    ctx.fillRect(hx, midY - 5, hw, 10);
     // windows
-    const wy = top + hh * 0.40;
-    function win(x) {
-      ctx.fillStyle = "#f0e08a";
-      ctx.fillRect(x, wy, hw * 0.14, hh * 0.16);
-      ctx.strokeStyle = "#1c1030";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x, wy, hw * 0.14, hh * 0.16);
-      ctx.beginPath();
-      ctx.moveTo(x + hw * 0.07, wy);
-      ctx.lineTo(x + hw * 0.07, wy + hh * 0.16);
-      ctx.moveTo(x, wy + hh * 0.08);
-      ctx.lineTo(x + hw * 0.14, wy + hh * 0.08);
-      ctx.stroke();
-    }
-    win(hx + hw * 0.12);
-    win(hx + hw * 0.74);
-    // door at ground level
-    const dw = hw * 0.22, dh = hh * 0.34;
-    const dx = W / 2 - dw / 2, dy = base - dh;
-    ctx.fillStyle = "#1a1020";
-    ctx.fillRect(dx, dy, dw, dh);
-    const open = clamp(doorOpen, 0, 1);
-    const leaf = dw * (1 - open * 0.85);
-    ctx.fillStyle = "#2c1a12";
-    ctx.fillRect(dx, dy, leaf, dh);
-    ctx.strokeStyle = "#12080c";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(dx, dy, Math.max(leaf, 1), dh);
-    if (open < 0.8) {
-      ctx.fillStyle = "#e0c040";
-      ctx.beginPath();
-      ctx.arc(dx + leaf - 10, dy + dh * 0.5, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function drawHouseInside() {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#120c24");
-    g.addColorStop(0.55, "#1c1238");
-    g.addColorStop(1, "#2a1830");
-    ctx.fillStyle = g;
-    ctx.fillRect(-20, -20, W + 40, H + 40);
-    // moonlit windows
-    function moonWin(x, y, ww, hh) {
+    function win(x, y, ww, hh) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x - 5, y - 5, ww + 10, hh + 10);
       const wg = ctx.createLinearGradient(x, y, x, y + hh);
-      wg.addColorStop(0, "#dce8ff");
-      wg.addColorStop(1, "#6a80b8");
+      wg.addColorStop(0, "#9ad8ff");
+      wg.addColorStop(1, "#e8f6ff");
       ctx.fillStyle = wg;
       ctx.fillRect(x, y, ww, hh);
-      ctx.strokeStyle = "#3a2a18";
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = "#6a4a18";
+      ctx.lineWidth = 3;
       ctx.strokeRect(x, y, ww, hh);
       ctx.beginPath();
       ctx.moveTo(x + ww / 2, y);
@@ -927,30 +1026,212 @@
       ctx.moveTo(x, y + hh / 2);
       ctx.lineTo(x + ww, y + hh / 2);
       ctx.stroke();
-    }
-    moonWin(28, 110, 70, 80);
-    moonWin(W - 98, 160, 70, 80);
-    moonWin(W / 2 - 40, 70, 80, 54);
-    // candles
-    function candle(x, y) {
-      ctx.fillStyle = "rgba(255,180,60,0.18)";
+      // curtains
+      ctx.fillStyle = "rgba(255,110,160,0.72)";
       ctx.beginPath();
-      ctx.arc(x, y - 10, 22, 0, Math.PI * 2);
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(x + ww * 0.16, y + hh * 0.35, x, y + hh);
+      ctx.lineTo(x, y);
       ctx.fill();
-      ctx.fillStyle = "#f0e0c0";
-      ctx.fillRect(x - 5, y, 10, 22);
-      ctx.fillStyle = "#ffd24a";
       ctx.beginPath();
-      ctx.ellipse(x, y - 8, 5, 9, 0, 0, Math.PI * 2);
+      ctx.moveTo(x + ww, y);
+      ctx.quadraticCurveTo(x + ww - ww * 0.16, y + hh * 0.35, x + ww, y + hh);
+      ctx.lineTo(x + ww, y);
       ctx.fill();
     }
-    candle(36, H * 0.55);
-    candle(W - 36, H * 0.48);
-    candle(44, H * 0.78);
-    candle(W - 48, H * 0.82);
-    // floor
-    ctx.fillStyle = "rgba(40,24,30,0.55)";
-    ctx.fillRect(-20, H * 0.88, W + 40, H * 0.16);
+    const ww = hw * 0.16, wh = hh * 0.13;
+    win(hx + hw * 0.10, eaves + 22, ww, wh);
+    win(hx + hw * 0.74, eaves + 22, ww, wh);
+    win(hx + hw * 0.10, midY + 18, ww, wh);
+    win(hx + hw * 0.74, midY + 18, ww, wh);
+    // attic window
+    const ax = hx + hw / 2, ay = (peak + eaves) / 2 + 8, ar = hw * 0.07;
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(ax, ay, ar + 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#9ad8ff";
+    ctx.beginPath();
+    ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#6a4a18";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+    ctx.moveTo(ax, ay - ar);
+    ctx.lineTo(ax, ay + ar);
+    ctx.moveTo(ax - ar, ay);
+    ctx.lineTo(ax + ar, ay);
+    ctx.stroke();
+    // flower boxes on lower windows
+    function box(x, y, ww) {
+      ctx.fillStyle = "#c06a38";
+      ctx.fillRect(x - 4, y + wh - 2, ww + 8, 10);
+      ctx.fillStyle = "#5ec84a";
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.arc(x + 6 + i * (ww / 3.2), y + wh - 6, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    box(hx + hw * 0.10, midY + 18, ww);
+    box(hx + hw * 0.74, midY + 18, ww);
+    // bushes by the walls
+    ctx.fillStyle = "#3daa3a";
+    ctx.beginPath();
+    ctx.arc(hx + 16, base - 8, 22, Math.PI, 0);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(hx + hw - 16, base - 8, 24, Math.PI, 0);
+    ctx.fill();
+    // door at ground level
+    const dw = hw * 0.2, dh = (base - midY) * 0.72;
+    const dx = W / 2 - dw / 2, dy = base - dh;
+    ctx.fillStyle = "#fff3c0";
+    ctx.fillRect(dx, dy, dw, dh);
+    const open = clamp(doorOpen, 0, 1);
+    const leaf = dw * (1 - open * 0.85);
+    ctx.fillStyle = "#3a7bdd";
+    ctx.fillRect(dx, dy, Math.max(leaf, 1), dh);
+    ctx.strokeStyle = "#1d3f8a";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(dx, dy, Math.max(leaf, 1), dh);
+    if (open < 0.8) {
+      ctx.fillStyle = "#ffe14a";
+      ctx.beginPath();
+      ctx.arc(dx + leaf - 10, dy + dh * 0.5, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawHouseInside() {
+    // bright, friendly room
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#fff8e0");
+    g.addColorStop(0.65, "#ffe9c4");
+    g.addColorStop(1, "#f6d49a");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    // wallpaper stripes
+    ctx.save();
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = "#ff9ec8";
+    for (let y = 16; y < H * 0.76; y += 30) ctx.fillRect(-20, y, W + 40, 11);
+    ctx.restore();
+    // wood floor
+    const fy = H * 0.78;
+    const fg = ctx.createLinearGradient(0, fy, 0, H);
+    fg.addColorStop(0, "#e8b56a");
+    fg.addColorStop(1, "#c8883c");
+    ctx.fillStyle = fg;
+    ctx.fillRect(-20, fy, W + 40, H - fy + 20);
+    ctx.strokeStyle = "rgba(120, 70, 20, 0.35)";
+    ctx.lineWidth = 2;
+    for (let y = fy; y < H + 8; y += 18) {
+      ctx.beginPath();
+      ctx.moveTo(-20, y);
+      ctx.lineTo(W + 20, y);
+      ctx.stroke();
+    }
+    for (let x = 0; x < W + 20; x += 52) {
+      ctx.beginPath();
+      ctx.moveTo(x, fy);
+      ctx.lineTo(x, H + 20);
+      ctx.stroke();
+    }
+    // baseboard
+    ctx.fillStyle = "#a86a30";
+    ctx.fillRect(-20, fy - 10, W + 40, 10);
+    // daytime windows + curtains
+    function dayWin(x, y, ww, hh) {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(x - 7, y - 7, ww + 14, hh + 14);
+      const wg = ctx.createLinearGradient(x, y, x, y + hh);
+      wg.addColorStop(0, "#8fd4ff");
+      wg.addColorStop(1, "#e8f6ff");
+      ctx.fillStyle = wg;
+      ctx.fillRect(x, y, ww, hh);
+      ctx.strokeStyle = "#c9a24a";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x, y, ww, hh);
+      ctx.beginPath();
+      ctx.moveTo(x + ww / 2, y);
+      ctx.lineTo(x + ww / 2, y + hh);
+      ctx.moveTo(x, y + hh / 2);
+      ctx.lineTo(x + ww, y + hh / 2);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,110,160,0.7)";
+      ctx.fillRect(x, y, 11, hh);
+      ctx.fillRect(x + ww - 11, y, 11, hh);
+    }
+    dayWin(22, 100, 74, 86);
+    dayWin(W - 96, 150, 74, 86);
+    dayWin(W / 2 - 42, 64, 84, 58);
+    // picture frames
+    function frame(x, y, fw, fh, bg) {
+      ctx.fillStyle = "#d4a84a";
+      ctx.fillRect(x - 5, y - 5, fw + 10, fh + 10);
+      ctx.fillStyle = bg;
+      ctx.fillRect(x, y, fw, fh);
+    }
+    frame(W / 2 - 100, 150, 40, 34, "#b8e8ff");
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath();
+    ctx.arc(W / 2 - 80, 164, 8, 0, Math.PI * 2);
+    ctx.fill();
+    frame(W / 2 + 60, 200, 36, 40, "#c8f5c0");
+    ctx.fillStyle = "#ff6b9a";
+    ctx.beginPath();
+    ctx.arc(W / 2 + 78, 218, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#5ec84a";
+    ctx.fillRect(W / 2 + 74, 224, 8, 10);
+    // sofa on the left
+    ctx.fillStyle = "#ff7a6e";
+    ctx.fillRect(10, fy - 52, 92, 44);
+    ctx.fillRect(10, fy - 70, 18, 22);
+    ctx.fillRect(84, fy - 70, 18, 22);
+    ctx.fillStyle = "#ff9a90";
+    ctx.fillRect(28, fy - 64, 56, 16);
+    // plant
+    ctx.fillStyle = "#c06a38";
+    ctx.fillRect(W - 42, fy - 22, 22, 18);
+    ctx.fillStyle = "#3daa3a";
+    ctx.beginPath();
+    ctx.ellipse(W - 31, fy - 40, 16, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(W - 42, fy - 34, 10, 16, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    // little table
+    ctx.fillStyle = "#c8883c";
+    ctx.fillRect(W / 2 - 36, fy - 28, 72, 10);
+    ctx.fillRect(W / 2 - 30, fy - 18, 8, 18);
+    ctx.fillRect(W / 2 + 22, fy - 18, 8, 18);
+    ctx.fillStyle = "#ffd24a";
+    ctx.beginPath();
+    ctx.arc(W / 2, fy - 38, 8, 0, Math.PI * 2);
+    ctx.fill();
+    // floor lamp
+    ctx.fillStyle = "#8a6a40";
+    ctx.fillRect(W - 118, fy - 90, 6, 90);
+    ctx.fillStyle = "#ffe566";
+    ctx.beginPath();
+    ctx.moveTo(W - 132, fy - 88);
+    ctx.lineTo(W - 98, fy - 88);
+    ctx.lineTo(W - 106, fy - 118);
+    ctx.lineTo(W - 124, fy - 118);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(255, 230, 120, 0.22)";
+    ctx.beginPath();
+    ctx.arc(W - 115, fy - 70, 36, 0, Math.PI * 2);
+    ctx.fill();
+    // rug
+    ctx.fillStyle = "rgba(90, 170, 230, 0.45)";
+    ctx.beginPath();
+    ctx.ellipse(W / 2, fy + 36, 90, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   function drawFlashlight() {
@@ -1075,6 +1356,7 @@
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(Math.sin(world.time * 2 + (o.bob || 0)) * 0.08);
+    if (o.flash > 0) ctx.filter = "brightness(1.85) saturate(0.55)";
     if (img) ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
     else {
       ctx.fillStyle = o.kind === "eye" ? "#9b32e6" : "#ff5f28";
@@ -1082,7 +1364,35 @@
       ctx.arc(0, 0, o.r, 0, Math.PI * 2);
       ctx.fill();
     }
+    if (o.flash > 0) {
+      ctx.filter = "none";
+      ctx.globalAlpha = Math.min(1, o.flash * 4) * 0.55;
+      ctx.fillStyle = "#fff8c0";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, drawW * 0.45, drawH * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
+    if (o.kind === "eye" && !o.dead) {
+      const hp = o.hp == null ? 10 : o.hp;
+      const maxHp = o.maxHp || 10;
+      const bw = 64, bh = 9;
+      const bx = o.x - bw / 2, by = o.y - drawH / 2 - 22;
+      ctx.fillStyle = "rgba(40,20,20,0.75)";
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bx - 2, by - 2, bw + 4, bh + 4, 4);
+      else ctx.rect(bx - 2, by - 2, bw + 4, bh + 4);
+      ctx.fill();
+      ctx.fillStyle = "#ff6b6b";
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = "#3dcc5a";
+      ctx.fillRect(bx, by, bw * Math.max(0, hp / maxHp), bh);
+      ctx.fillStyle = "#fff";
+      ctx.font = "800 11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(hp + " / 10", o.x, by - 2);
+    }
   }
 
   function drawObstacle(o) {
@@ -1274,6 +1584,15 @@
       ctx.fillStyle = "#fff";
       ctx.beginPath();
       ctx.arc(p.x - p.r * 0.25, p.y - p.r * 0.25, p.r * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.kind === "poof") {
+      ctx.fillStyle = p.color || "#ffe566";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.beginPath();
+      ctx.arc(p.x - p.r * 0.25, p.y - p.r * 0.25, p.r * 0.35, 0, Math.PI * 2);
       ctx.fill();
     } else {
       ctx.fillStyle = "#ffe566";
@@ -1583,8 +1902,8 @@
         chosen.p2 = null;
         skipNextIntro = true;
         startGame();
-        world.obstacles.push({ x: W * 0.62, y: H * 0.42, r: 48, kind: "eye", rot: 0, passed: false, bob: 1 });
-        world.obstacles.push({ x: W * 0.72, y: H * 0.68, r: 40, kind: "ghostBig", rot: 0, passed: false, bob: 2 });
+        world.obstacles.push(makeHouseEnemy("eye", W * 0.62, H * 0.46));
+        world.obstacles.push(makeHouseEnemy("ghostBig", W * 0.72, H * 0.70));
         world.stars.push({ x: W * 0.55, y: H * 0.28, r: 18, rot: 0.4, candy: true });
       },
       getState: () => state,

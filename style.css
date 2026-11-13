@@ -198,7 +198,7 @@ h1 {
   touch-action: manipulation;
 }
 .mode-btn.mode-2p { background: #ffef57; }
-.mode-btn.mode-house { background: #c47cff; color: #1a1030; }
+.mode-btn.mode-house { background: #ffb347; color: #3a2100; }
 .mode-btn:active {
   transform: translateY(5px);
   box-shadow: 0 3px 0 #16324a;

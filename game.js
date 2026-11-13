@@ -869,7 +869,8 @@
           s.got = true;
           addScore(p, 10, s.x, s.y);
           sfxCollect();
-          burst(s.x, s.y);
+          if (s.coin) coinBurst(s.x, s.y);
+          else burst(s.x, s.y);
         }
       }
     }
@@ -900,10 +901,23 @@
   function tryJump(p) {
     if (!p || p.ghost) return false;
     if (!(p.jumpBuf > 0) || !(p.coyote > 0)) return false;
-    p.vy = -720;
+    p.vy = isChaseMode() ? -680 : -720;
     p.coyote = 0;
     p.jumpBuf = 0;
     p.onGround = false;
+    if (isChaseMode()) {
+      const { drawH } = playerSize(p);
+      for (let i = 0; i < 5; i++) {
+        world.particles.push({
+          x: p.x + rand(-12, 12),
+          y: p.y + drawH * 0.4,
+          vx: rand(-30, 30),
+          vy: rand(20, 70),
+          t: 0, life: rand(0.25, 0.45), r: rand(3, 7),
+          kind: "sparkle", color: "#fff",
+        });
+      }
+    }
     sfxBoost();
     return true;
   }
@@ -917,12 +931,12 @@
     }
     const sp = world.speed * dt;
     world.dist += sp;
-    const GRAVITY = 1850;
+    const GRAVITY = isChaseMode() ? 1080 : 1850;
     const floor = houseFloorTop();
 
     for (const p of world.players) {
       p.vy += GRAVITY * dt;
-      p.vy = clamp(p.vy, -900, 980);
+      p.vy = isChaseMode() ? clamp(p.vy, -780, 540) : clamp(p.vy, -900, 980);
       p.y += p.vy * dt;
       p.onGround = false;
       const { drawW, drawH } = playerSize(p);
@@ -1061,6 +1075,17 @@
     for (const p of world.players) standOnFloor(p, fy);
     placePlayers();
     if (world.players[0]) world.players[0].x = clamp(W * 0.58, 170, 240);
+    world.clouds = [];
+    for (let i = 0; i < 9; i++) {
+      world.clouds.push({
+        x: (W * ((i + 0.4) / 9)) + rand(-24, 24),
+        y: 40 + (i % 4) * 70 + rand(-16, 16),
+        s: rand(0.55, 1.15),
+        z: 0.12 + (i % 5) * 0.08,
+        shade: rand(0.9, 1),
+        bob: rand(0, 8),
+      });
+    }
   }
 
   function spawnChaseWave() {
@@ -1097,79 +1122,106 @@
     if (world.chaseHitT <= 0) {
       world.chaseGap = Math.min(120, world.chaseGap + 14 * dt);
     }
-    // sparkle trail from the skater
+    // glow trail from the skater
     const p = world.players[0];
     if (!p) return;
-    if (Math.random() < 0.9) {
-      const sx = p.x - world.chaseGap + 10;
-      const fy = houseFloorTop();
+    const sx = p.x - world.chaseGap + 8;
+    for (let i = 0; i < 2; i++) {
       world.particles.push({
-        x: sx + rand(-8, 16),
-        y: p.y + 20 + rand(-8, 10),
-        vx: rand(-80, -20),
-        vy: rand(-20, 20),
-        t: 0, life: rand(0.2, 0.4), r: rand(4, 9),
-        kind: "flame", color: "#5ad0ff",
+        x: sx + rand(-18, 10),
+        y: p.y + 22 + rand(-10, 10),
+        vx: rand(-110, -30),
+        vy: rand(-18, 18),
+        t: 0, life: rand(0.28, 0.5), r: rand(5, 11),
+        kind: "zip",
       });
     }
   }
 
   function drawChaseScene() {
     const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#8fd8ff");
-    g.addColorStop(0.45, "#c8f0ff");
-    g.addColorStop(0.62, "#fff4b8");
-    g.addColorStop(1, "#7ed957");
+    g.addColorStop(0, "#c4e8ff");
+    g.addColorStop(0.28, "#e4f6ff");
+    g.addColorStop(0.52, "#fff6d8");
+    g.addColorStop(0.68, "#e3f8c8");
+    g.addColorStop(1, "#b4ec86");
     ctx.fillStyle = g;
     ctx.fillRect(-20, -20, W + 40, H + 40);
-    // sun
-    ctx.fillStyle = "#ffe14a";
-    ctx.beginPath();
-    ctx.arc(W - 64, 78, 34, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,220,0.35)";
-    ctx.beginPath();
-    ctx.arc(W - 64, 78, 54, 0, Math.PI * 2);
-    ctx.fill();
-    for (const c of world.clouds) drawPuff(c.x, Math.min(c.y, H * 0.42), 46 * c.s, `rgba(255,255,255,${0.7 + c.z * 0.2})`);
-    // speed lines
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
     const fy = houseFloorTop();
-    for (let i = 0; i < 10; i++) {
-      const y = 90 + ((i * 47 + world.dist * 0.4) % (fy - 120));
-      const x2 = W * 0.92 - ((world.dist * 1.8 + i * 80) % (W * 0.7));
+    // soft sun + glow
+    const sunX = W - 70, sunY = 86;
+    const sunG = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, 92);
+    sunG.addColorStop(0, "rgba(255,255,230,0.95)");
+    sunG.addColorStop(0.22, "rgba(255,230,90,0.85)");
+    sunG.addColorStop(0.55, "rgba(255,220,120,0.22)");
+    sunG.addColorStop(1, "rgba(255,230,160,0)");
+    ctx.fillStyle = sunG;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 92, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffe566";
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 30, 0, Math.PI * 2);
+    ctx.fill();
+    // far pastel hills (slow parallax)
+    const far = -((world.dist * 0.12) % (W + 260));
+    ctx.fillStyle = "rgba(170, 220, 130, 0.55)";
+    for (let i = -1; i < 4; i++) {
+      const hx = far + i * (W * 0.55) + 80;
       ctx.beginPath();
-      ctx.moveTo(x2 - 50, y);
+      ctx.ellipse(hx, fy - 8, 160, 58, 0, Math.PI, 0, true);
+      ctx.fill();
+    }
+    // closer mint hills
+    const near = -((world.dist * 0.28) % (W + 200));
+    ctx.fillStyle = "rgba(130, 210, 110, 0.7)";
+    for (let i = -1; i < 4; i++) {
+      const hx = near + i * (W * 0.48) + 40;
+      ctx.beginPath();
+      ctx.ellipse(hx, fy + 10, 130, 48, 0, Math.PI, 0, true);
+      ctx.fill();
+    }
+    // floating clouds, far to near
+    const clouds = world.clouds.slice().sort((a, b) => a.z - b.z);
+    for (const c of clouds) {
+      const by = c.y + Math.sin(world.time * (0.6 + c.z) + (c.bob || 0)) * 8;
+      const a = 0.55 + c.z * 0.4;
+      drawPuff(c.x, Math.min(by, H * 0.48), 40 * c.s, `rgba(255,255,255,${a})`);
+    }
+    // smooth speed lines
+    ctx.save();
+    ctx.lineCap = "round";
+    for (let i = 0; i < 12; i++) {
+      const y = 80 + ((i * 41 + world.dist * 0.22) % Math.max(80, fy - 140));
+      const len = 36 + (i % 4) * 18;
+      const x2 = W * 0.95 - ((world.dist * 1.6 + i * 90) % (W * 0.85));
+      ctx.strokeStyle = "rgba(255,255,255," + (0.14 + (i % 3) * 0.07) + ")";
+      ctx.lineWidth = 2 + (i % 3) * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x2 - len, y);
       ctx.lineTo(x2, y);
       ctx.stroke();
     }
     ctx.restore();
-    // hills
-    ctx.fillStyle = "#5fc14a";
-    ctx.beginPath();
-    ctx.ellipse(W * 0.15, fy + 30, 180, 70, 0, Math.PI, 0);
-    ctx.ellipse(W * 0.7, fy + 20, 200, 80, 0, Math.PI, 0);
-    ctx.fill();
-    // grass floor
-    ctx.fillStyle = "#5dbe3a";
+    // airy grass floor
+    const grass = ctx.createLinearGradient(0, fy - 8, 0, H);
+    grass.addColorStop(0, "#c6f59a");
+    grass.addColorStop(0.12, "#98e46a");
+    grass.addColorStop(1, "#7ed957");
+    ctx.fillStyle = grass;
     ctx.fillRect(-20, fy, W + 40, H - fy + 40);
-    ctx.fillStyle = "#79d85a";
-    ctx.fillRect(-20, fy, W + 40, 16);
-    // dashed ground line
+    ctx.fillStyle = "rgba(255,255,255,0.28)";
+    ctx.fillRect(-20, fy, W + 40, 10);
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.45)";
-    ctx.lineWidth = 4;
-    ctx.setLineDash([16, 14]);
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([18, 16]);
     ctx.lineDashOffset = -world.dist * 0.8;
     ctx.beginPath();
-    ctx.moveTo(-20, fy + 28);
-    ctx.lineTo(W + 20, fy + 28);
+    ctx.moveTo(-20, fy + 26);
+    ctx.lineTo(W + 20, fy + 26);
     ctx.stroke();
     ctx.restore();
-    scrollDecor(0, 0); // no-op if already scrolled in update; keep clouds drawn
   }
 
   function drawChasers() {
@@ -1185,14 +1237,19 @@
     if (imgS) {
       const drawH = 92;
       const drawW = (imgS.width / imgS.height) * drawH;
-      // glow trail
-      const glow = ctx.createLinearGradient(sx - 70, sy, sx, sy);
-      glow.addColorStop(0, "rgba(80,180,255,0)");
-      glow.addColorStop(1, "rgba(80,200,255,0.45)");
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.ellipse(sx - 10, p.y + 28, 70, 18, 0, 0, Math.PI * 2);
-      ctx.fill();
+      // layered glowing skate trail
+      const by = p.y + 30;
+      for (let i = 3; i >= 0; i--) {
+        const gx = sx - 18 - i * 28;
+        const gg = ctx.createRadialGradient(gx + 20, by, 2, gx, by, 38 + i * 8);
+        gg.addColorStop(0, "rgba(180,240,255," + (0.5 - i * 0.1) + ")");
+        gg.addColorStop(0.45, "rgba(80,200,255," + (0.28 - i * 0.05) + ")");
+        gg.addColorStop(1, "rgba(80,180,255,0)");
+        ctx.fillStyle = gg;
+        ctx.beginPath();
+        ctx.ellipse(gx, by, 46 + i * 10, 11 + i * 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.drawImage(imgS, sx - drawW * 0.55, p.y - drawH * 0.15, drawW, drawH);
     }
     // tickle hand a bit further back and lower
@@ -1213,13 +1270,13 @@
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot || 0);
     ctx.scale(pop, pop);
-    // red disc glow
-    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, o.r * 1.4);
-    g.addColorStop(0, "rgba(255,80,70,0.5)");
+    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, o.r * 1.7);
+    g.addColorStop(0, "rgba(255,220,180,0.65)");
+    g.addColorStop(0.35, "rgba(255,90,80,0.45)");
     g.addColorStop(1, "rgba(255,80,70,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(0, 0, o.r * 1.4, 0, Math.PI * 2);
+    ctx.arc(0, 0, o.r * 1.7, 0, Math.PI * 2);
     ctx.fill();
     if (img) {
       const drawH = o.r * 2.2;
@@ -1332,6 +1389,37 @@
     });
   }
 
+  function coinBurst(x, y) {
+    const cols = ["#fffce0", "#ffe566", "#ffd24a", "#ffffff", "#ffe9a0"];
+    for (let i = 0; i < 14; i++) {
+      const a = (Math.PI * 2 * i) / 14 + rand(-0.2, 0.2);
+      const sp = rand(50, 180);
+      world.particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 40,
+        t: 0, life: rand(0.35, 0.7), r: rand(3, 7),
+        kind: "sparkle", color: cols[i % cols.length],
+      });
+    }
+  }
+
+  function drawTwinkle(x, y, rad, col) {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - rad, y);
+    ctx.lineTo(x + rad, y);
+    ctx.moveTo(x, y - rad);
+    ctx.lineTo(x, y + rad);
+    ctx.moveTo(x - rad * 0.65, y - rad * 0.65);
+    ctx.lineTo(x + rad * 0.65, y + rad * 0.65);
+    ctx.moveTo(x - rad * 0.65, y + rad * 0.65);
+    ctx.lineTo(x + rad * 0.65, y - rad * 0.65);
+    ctx.stroke();
+  }
+
   function burst(x, y) {
     for (let i = 0; i < 8; i++) {
       const a = (Math.PI * 2 * i) / 8;
@@ -1406,9 +1494,9 @@
       c.x -= speed * c.z * dt;
       if (c.x < -160) {
         c.x = W + rand(40, 180);
-        c.y = rand(30, H * 0.72);
-        c.s = rand(0.6, 1.4);
-        c.z = rand(0.25, 0.7);
+        c.y = isChaseMode() ? rand(30, H * 0.46) : rand(30, H * 0.72);
+        c.s = rand(0.6, 1.6);
+        c.z = isChaseMode() ? rand(0.1, 0.55) : rand(0.25, 0.7);
       }
     }
   }
@@ -1948,6 +2036,19 @@
       ctx.restore();
     }
     ctx.drawImage(ch.image, -drawW / 2, -drawH / 2, drawW, drawH);
+    if (ch.id === "money" && !p.ghost) {
+      const tw = drawW * 0.34, th = drawH * 0.16;
+      const pulse = 0.55 + Math.sin(world.time * 8) * 0.45;
+      ctx.save();
+      ctx.globalAlpha = 0.35 + pulse * 0.55;
+      ctx.fillStyle = "#fffce0";
+      ctx.beginPath();
+      ctx.arc(tw, th, 3.2 + pulse, 0, Math.PI * 2);
+      ctx.fill();
+      drawTwinkle(tw + 8, th - 10, 5 + pulse * 2, "rgba(255,255,220,0.95)");
+      drawTwinkle(tw - 4, th - 16, 3.4, "rgba(255,240,160,0.85)");
+      ctx.restore();
+    }
 
     // 2P color tag under the buddy
     if (mode === 2) {
@@ -2059,6 +2160,16 @@
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
+    if (isChaseMode()) {
+      const shine = ctx.createRadialGradient(-o.r * 0.2, -o.r * 0.25, 2, 0, 0, o.r * 1.85);
+      shine.addColorStop(0, "rgba(255,255,255,0.4)");
+      shine.addColorStop(0.35, o.kind === "spike" ? "rgba(255,120,180,0.28)" : "rgba(200,180,255,0.28)");
+      shine.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = shine;
+      ctx.beginPath();
+      ctx.arc(0, 0, o.r * 1.85, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (o.kind === "spike") {
       // Glossy red/magenta spike ball — clearly not a gold star
       const halo = ctx.createRadialGradient(0, 0, o.r * 0.2, 0, 0, o.r * 1.7);
@@ -2152,10 +2263,19 @@
     ctx.rotate(s.rot);
     const r = s.r;
     if (s.coin) {
+      const bob = Math.sin(world.time * 4 + s.x * 0.05) * 4;
+      ctx.translate(0, bob);
+      const halo = ctx.createRadialGradient(0, 0, 2, 0, 0, r * 1.8);
+      halo.addColorStop(0, "rgba(255,240,140,0.7)");
+      halo.addColorStop(1, "rgba(255,210,40,0)");
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.8, 0, Math.PI * 2);
+      ctx.fill();
       const g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, 2, 0, 0, r);
-      g.addColorStop(0, "#fff6b0");
-      g.addColorStop(0.45, "#ffd24a");
-      g.addColorStop(1, "#c98900");
+      g.addColorStop(0, "#fffce0");
+      g.addColorStop(0.4, "#ffe566");
+      g.addColorStop(1, "#e0a000");
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, Math.PI * 2);
       ctx.fillStyle = g;
@@ -2163,11 +2283,18 @@
       ctx.lineWidth = 3;
       ctx.strokeStyle = "#8a5a00";
       ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.65)";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.25, -r * 0.28, r * 0.28, r * 0.16, -0.5, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = "#8a5a00";
       ctx.font = "800 " + Math.round(r * 1.15) + "px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("$", 0, 1);
+      const tw = 0.6 + Math.sin(world.time * 9 + s.x) * 0.4;
+      drawTwinkle(r * 0.7, -r * 0.85, 4.5 * tw, "rgba(255,255,230,0.95)");
+      drawTwinkle(-r * 0.9, r * 0.15, 3.2 * tw, "rgba(255,240,180,0.85)");
       ctx.restore();
       return;
     }
@@ -2270,8 +2397,14 @@
       ctx.beginPath();
       ctx.arc(p.x - p.r * 0.25, p.y - p.r * 0.25, p.r * 0.35, 0, Math.PI * 2);
       ctx.fill();
+    } else if (p.kind === "sparkle") {
+      drawTwinkle(p.x, p.y, p.r, p.color || "#fffce0");
+      ctx.fillStyle = p.color || "#fffce0";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(1.2, p.r * 0.28), 0, Math.PI * 2);
+      ctx.fill();
     } else {
-      ctx.fillStyle = "#ffe566";
+      ctx.fillStyle = p.color || "#ffe566";
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();

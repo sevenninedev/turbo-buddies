@@ -15,6 +15,21 @@
   ];
 
   let tickleImg = null;
+  const HOUSE_BEST_KEY = "turboBuddiesHouseBest";
+  const HOUSE_CHARS = [
+    { id: "cap", name: "Cap", src: "assets/cap_guy.png" },
+    { id: "crown", name: "Crown", src: "assets/crown_guy.png" },
+  ];
+  const HOUSE_ENEMY_SRCS = {
+    eye: "assets/eye_monster.png",
+    ghostBig: "assets/ghost_big.png",
+    ghostSmall: "assets/ghost_small.png",
+  };
+  const houseEnemyImgs = {};
+  let campaign = "classic"; // classic | house
+  let skipNextIntro = false;
+  function roster() { return campaign === "house" ? HOUSE_CHARS : CHARS; }
+  function bestKey() { return campaign === "house" ? HOUSE_BEST_KEY : BEST_KEY; }
 
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
@@ -121,12 +136,12 @@
   }
 
   function getBest() {
-    const n = parseInt(localStorage.getItem(BEST_KEY) || "0", 10);
+    const n = parseInt(localStorage.getItem(bestKey()) || "0", 10);
     return Number.isFinite(n) ? n : 0;
   }
   function setBest(n) {
     const b = Math.max(getBest(), n);
-    localStorage.setItem(BEST_KEY, String(b));
+    localStorage.setItem(bestKey(), String(b));
     return b;
   }
 
@@ -193,6 +208,10 @@
     world.tickleT = 5.2;
     world.shake = 0;
     world.hintT = 3.4;
+    world.introT = 0;
+    world.doorOpen = 0;
+    world.flashT = 3.8;
+    world.flashAge = 0;
     pointers.clear();
     keysDown.clear();
     seedClouds();
@@ -216,20 +235,55 @@
     ensureAudio();
     sfxStart();
     resetRun();
-    state = "play";
     elStart.hidden = true;
     elOver.hidden = true;
-    elHud.hidden = false;
     elHud.classList.toggle("onep", mode === 1);
     elHudP2.hidden = mode !== 2;
-    elHint.hidden = false;
     elHint.classList.toggle("twop", mode === 2);
     if (mode === 2) {
       elHint.innerHTML = '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
     } else {
-      elHint.textContent = "HOLD TO FLY!";
+      elHint.textContent = campaign === "house" ? "HOLD TO FLY! Flashlight zaps baddies!" : "HOLD TO FLY!";
     }
     updateHud();
+    if (campaign === "house" && !skipNextIntro) {
+      state = "intro";
+      setupIntroWalk();
+      elHud.hidden = true;
+      elHint.hidden = true;
+    } else {
+      beginPlay();
+    }
+    skipNextIntro = false;
+  }
+
+  function beginPlay() {
+    state = "play";
+    elHud.hidden = false;
+    elHint.hidden = false;
+    if (campaign === "house") {
+      placePlayers();
+      world.spawnT = 0.7;
+      world.flashT = 3.2;
+    }
+    updateHud();
+  }
+
+  function houseGroundY() { return H * 0.70; }
+
+  function setupIntroWalk() {
+    const gy = houseGroundY();
+    const startY = H - 64;
+    world.players.forEach((p, i) => {
+      const { drawH } = playerSize(p);
+      p.x = W * 0.5 + (mode === 2 ? (i === 0 ? -36 : 36) : 0);
+      p.y = startY - drawH * 0.38;
+      p.vy = 0;
+      p._walkFrom = p.y;
+      p._walkTo = gy - drawH * 0.42;
+    });
+    world.introT = 0;
+    world.doorOpen = 0;
   }
 
   function livingPlayers() {
@@ -317,6 +371,7 @@
   }
 
   function spawnWave() {
+    if (campaign === "house") { spawnHouseWave(); return; }
     const sample = world.players[0] || makePlayer(1, CHARS[0], 0);
     const { drawH } = playerSize(sample);
     const margin = 50 + drawH * 0.15;
@@ -350,8 +405,61 @@
     return { x, y, r, kind, rot: rand(-0.3, 0.3), passed: false };
   }
 
+  function spawnHouseWave() {
+    const kinds = ["ghostSmall", "ghostSmall", "ghostBig", "eye"];
+    const kind = kinds[(Math.random() * kinds.length) | 0];
+    const margin = 80;
+    const y = rand(margin, H - margin);
+    const r = kind === "eye" ? 50 : kind === "ghostBig" ? 46 : 34;
+    world.obstacles.push({
+      x: W + 80, y, r, kind, rot: 0, passed: false, bob: rand(0, 8),
+    });
+    const sy = clamp(y + rand(-170, 170), margin, H - margin);
+    world.stars.push({ x: W + 110, y: sy, r: 18, rot: rand(0, 6), candy: true });
+  }
+
+  function updateIntro(dt) {
+    world.introT += dt;
+    const t = world.introT;
+    const walk = clamp((t - 0.2) / 2.4, 0, 1);
+    const u = walk * walk * (3 - 2 * walk);
+    for (const p of world.players) {
+      if (p._walkFrom != null) p.y = p._walkFrom + (p._walkTo - p._walkFrom) * u;
+      p.vy = 0;
+      p.boosting = false;
+    }
+    if (t > 2.05) world.doorOpen = clamp((t - 2.05) / 0.45, 0, 1);
+    if (t > 3.15) beginPlay();
+  }
+
+  function fireFlashlight() {
+    world.flashAge = 0.38;
+    beep(1200, 0.08, "sine", 0.06, 0, 1800);
+    beep(1600, 0.1, "square", 0.04, 0.06);
+    for (const p of livingPlayers()) {
+      const { drawH } = playerSize(p);
+      const beamX0 = p.x + 20, beamX1 = p.x + 210;
+      const beamY = p.y + drawH * 0.05;
+      for (const o of world.obstacles) {
+        if (o.zapped || o.x < beamX0 || o.x > beamX1) continue;
+        if (Math.abs(o.y - beamY) < 70 + o.r * 0.4) {
+          o.zapped = true;
+          o.passed = true;
+          addScore(p, 15, o.x, o.y);
+          world.popups.push({ x: o.x, y: o.y - 20, t: 0, text: "ZAP!", color: "#ffe566" });
+          burst(o.x, o.y);
+        }
+      }
+    }
+    world.obstacles = world.obstacles.filter((o) => !o.zapped);
+  }
+
   function update(dt) {
     world.time += dt;
+    if (state === "intro") {
+      updateIntro(dt);
+      return;
+    }
     if (state !== "play") {
       scrollDecor(dt, 40);
       return;
@@ -412,12 +520,24 @@
     for (const s of world.stars) s.x -= sp;
     scrollDecor(dt, world.speed);
 
-    world.tickleT -= dt;
-    if (world.tickleT <= 0 && livingPlayers().length) {
-      spawnTickle();
-      world.tickleT = rand(7.2, 11.5);
+    if (campaign !== "house") {
+      world.tickleT -= dt;
+      if (world.tickleT <= 0 && livingPlayers().length) {
+        spawnTickle();
+        world.tickleT = rand(7.2, 11.5);
+      }
+      updateTickles(dt);
+    } else {
+      for (const o of world.obstacles) {
+        if (o.bob != null) o.y += Math.sin(world.time * 2.2 + o.bob) * 28 * dt;
+      }
+      world.flashT -= dt;
+      if (world.flashAge > 0) world.flashAge -= dt;
+      if (world.flashT <= 0 && livingPlayers().length) {
+        fireFlashlight();
+        world.flashT = rand(3.6, 5.0);
+      }
     }
-    updateTickles(dt);
 
     for (const o of world.obstacles) {
       if (o.x < -80) continue;
@@ -598,23 +718,29 @@
     ctx.save();
     ctx.translate(sx, sy);
 
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#9be4ff");
-    g.addColorStop(0.55, "#7ec8f0");
-    g.addColorStop(1, "#fff3b0");
-    ctx.fillStyle = g;
-    ctx.fillRect(-20, -20, W + 40, H + 40);
+    if (state === "intro") {
+      drawHouseOutside();
+    } else if (campaign === "house") {
+      drawHouseInside();
+    } else {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#9be4ff");
+      g.addColorStop(0.55, "#7ec8f0");
+      g.addColorStop(1, "#fff3b0");
+      ctx.fillStyle = g;
+      ctx.fillRect(-20, -20, W + 40, H + 40);
 
-    ctx.beginPath();
-    ctx.fillStyle = "#ffe66b";
-    ctx.arc(W - 70, 70, 36, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.fillStyle = "rgba(255,255,220,0.35)";
-    ctx.arc(W - 70, 70, 58, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = "#ffe66b";
+      ctx.arc(W - 70, 70, 36, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = "rgba(255,255,220,0.35)";
+      ctx.arc(W - 70, 70, 58, 0, Math.PI * 2);
+      ctx.fill();
 
-    for (const c of world.clouds) drawPuff(c.x, c.y, 46 * c.s, `rgba(255,255,255,${0.55 + c.z * 0.25})`);
+      for (const c of world.clouds) drawPuff(c.x, c.y, 46 * c.s, `rgba(255,255,255,${0.55 + c.z * 0.25})`);
+    }
 
     // 2P split guide
     if (state === "play" && mode === 2) {
@@ -629,11 +755,16 @@
       ctx.restore();
     }
 
+    if (state === "intro") {
+      for (const p of world.players) drawPlayer(p);
+    }
+
     if (state === "play" || state === "over") {
+      if (campaign === "house" && world.flashAge > 0) drawFlashlight();
       for (const o of world.obstacles) drawObstacle(o);
       for (const s of world.stars) if (!s.got) drawStar(s);
       for (const part of world.particles) drawParticle(part);
-      for (const tk of world.tickles) drawTickle(tk);
+      if (campaign !== "house") for (const tk of world.tickles) drawTickle(tk);
       for (const p of world.players) drawPlayer(p);
       for (const pop of world.popups) {
         ctx.save();
@@ -650,6 +781,193 @@
     }
 
     ctx.restore();
+  }
+
+  function drawHouseOutside() {
+    const gy = houseGroundY();
+    // night sky
+    const g = ctx.createLinearGradient(0, 0, 0, gy);
+    g.addColorStop(0, "#14102a");
+    g.addColorStop(0.7, "#2a1a48");
+    g.addColorStop(1, "#3a2858");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, gy + 20);
+    // moon
+    ctx.fillStyle = "#f6f0c8";
+    ctx.beginPath();
+    ctx.arc(W - 62, 64, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,210,0.18)";
+    ctx.beginPath();
+    ctx.arc(W - 62, 64, 48, 0, Math.PI * 2);
+    ctx.fill();
+    // GROUND — house sits on this, not in the sky
+    const grass = ctx.createLinearGradient(0, gy, 0, H);
+    grass.addColorStop(0, "#3d9a3a");
+    grass.addColorStop(0.4, "#2e7a32");
+    grass.addColorStop(1, "#1c4d20");
+    ctx.fillStyle = grass;
+    ctx.fillRect(-20, gy, W + 40, H - gy + 20);
+    // grass tufts along the ground line
+    ctx.fillStyle = "#4bb04a";
+    for (let i = 0; i < 18; i++) {
+      const gx = (i / 17) * W + Math.sin(i * 2.1) * 6;
+      ctx.beginPath();
+      ctx.moveTo(gx, gy + 2);
+      ctx.lineTo(gx - 4, gy - 10);
+      ctx.lineTo(gx + 2, gy + 2);
+      ctx.lineTo(gx + 8, gy - 12);
+      ctx.lineTo(gx + 4, gy + 2);
+      ctx.fill();
+    }
+    // path up to the door (on the ground)
+    const doorW = Math.min(W * 0.82, 340) * 0.22;
+    ctx.beginPath();
+    ctx.moveTo(W * 0.22, H + 10);
+    ctx.lineTo(W * 0.78, H + 10);
+    ctx.lineTo(W * 0.5 + doorW * 0.55, gy + 4);
+    ctx.lineTo(W * 0.5 - doorW * 0.55, gy + 4);
+    ctx.closePath();
+    const pg = ctx.createLinearGradient(0, gy, 0, H);
+    pg.addColorStop(0, "#d2ae6e");
+    pg.addColorStop(1, "#9a7540");
+    ctx.fillStyle = pg;
+    ctx.fill();
+    ctx.strokeStyle = "#6a4a22";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    drawSpookyHouse(gy, world.doorOpen || 0);
+  }
+
+  function drawSpookyHouse(gy, doorOpen) {
+    const hw = Math.min(W * 0.82, 340);
+    const hh = H * 0.36;
+    const hx = (W - hw) / 2;
+    const base = gy; // sits ON the ground
+    const top = base - hh;
+    // chimney
+    ctx.fillStyle = "#3a2a48";
+    ctx.fillRect(hx + hw * 0.72, top + hh * 0.08, hw * 0.1, hh * 0.28);
+    ctx.fillStyle = "#2a1a30";
+    ctx.fillRect(hx + hw * 0.70, top + hh * 0.05, hw * 0.14, 10);
+    // roof
+    ctx.beginPath();
+    ctx.moveTo(hx - 14, top + hh * 0.32);
+    ctx.lineTo(hx + hw / 2, top - 8);
+    ctx.lineTo(hx + hw + 14, top + hh * 0.32);
+    ctx.closePath();
+    ctx.fillStyle = "#1a1028";
+    ctx.fill();
+    ctx.strokeStyle = "#0a0614";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    // body
+    ctx.fillStyle = "#4a3270";
+    ctx.fillRect(hx, top + hh * 0.28, hw, hh * 0.72);
+    ctx.strokeStyle = "#1c1030";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(hx, top + hh * 0.28, hw, hh * 0.72);
+    // windows
+    const wy = top + hh * 0.40;
+    function win(x) {
+      ctx.fillStyle = "#f0e08a";
+      ctx.fillRect(x, wy, hw * 0.14, hh * 0.16);
+      ctx.strokeStyle = "#1c1030";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, wy, hw * 0.14, hh * 0.16);
+      ctx.beginPath();
+      ctx.moveTo(x + hw * 0.07, wy);
+      ctx.lineTo(x + hw * 0.07, wy + hh * 0.16);
+      ctx.moveTo(x, wy + hh * 0.08);
+      ctx.lineTo(x + hw * 0.14, wy + hh * 0.08);
+      ctx.stroke();
+    }
+    win(hx + hw * 0.12);
+    win(hx + hw * 0.74);
+    // door at ground level
+    const dw = hw * 0.22, dh = hh * 0.34;
+    const dx = W / 2 - dw / 2, dy = base - dh;
+    ctx.fillStyle = "#1a1020";
+    ctx.fillRect(dx, dy, dw, dh);
+    const open = clamp(doorOpen, 0, 1);
+    const leaf = dw * (1 - open * 0.85);
+    ctx.fillStyle = "#2c1a12";
+    ctx.fillRect(dx, dy, leaf, dh);
+    ctx.strokeStyle = "#12080c";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(dx, dy, Math.max(leaf, 1), dh);
+    if (open < 0.8) {
+      ctx.fillStyle = "#e0c040";
+      ctx.beginPath();
+      ctx.arc(dx + leaf - 10, dy + dh * 0.5, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawHouseInside() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#120c24");
+    g.addColorStop(0.55, "#1c1238");
+    g.addColorStop(1, "#2a1830");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    // moonlit windows
+    function moonWin(x, y, ww, hh) {
+      const wg = ctx.createLinearGradient(x, y, x, y + hh);
+      wg.addColorStop(0, "#dce8ff");
+      wg.addColorStop(1, "#6a80b8");
+      ctx.fillStyle = wg;
+      ctx.fillRect(x, y, ww, hh);
+      ctx.strokeStyle = "#3a2a18";
+      ctx.lineWidth = 5;
+      ctx.strokeRect(x, y, ww, hh);
+      ctx.beginPath();
+      ctx.moveTo(x + ww / 2, y);
+      ctx.lineTo(x + ww / 2, y + hh);
+      ctx.moveTo(x, y + hh / 2);
+      ctx.lineTo(x + ww, y + hh / 2);
+      ctx.stroke();
+    }
+    moonWin(28, 110, 70, 80);
+    moonWin(W - 98, 160, 70, 80);
+    moonWin(W / 2 - 40, 70, 80, 54);
+    // candles
+    function candle(x, y) {
+      ctx.fillStyle = "rgba(255,180,60,0.18)";
+      ctx.beginPath();
+      ctx.arc(x, y - 10, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#f0e0c0";
+      ctx.fillRect(x - 5, y, 10, 22);
+      ctx.fillStyle = "#ffd24a";
+      ctx.beginPath();
+      ctx.ellipse(x, y - 8, 5, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    candle(36, H * 0.55);
+    candle(W - 36, H * 0.48);
+    candle(44, H * 0.78);
+    candle(W - 48, H * 0.82);
+    // floor
+    ctx.fillStyle = "rgba(40,24,30,0.55)";
+    ctx.fillRect(-20, H * 0.88, W + 40, H * 0.16);
+  }
+
+  function drawFlashlight() {
+    const a = clamp(world.flashAge / 0.38, 0, 1);
+    for (const p of livingPlayers()) {
+      const { drawH } = playerSize(p);
+      ctx.save();
+      ctx.globalAlpha = 0.35 * a;
+      ctx.fillStyle = "#fff6a0";
+      ctx.beginPath();
+      ctx.moveTo(p.x + 16, p.y);
+      ctx.lineTo(p.x + 220, p.y - 50);
+      ctx.lineTo(p.x + 220, p.y + 50);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   function drawPlayer(p) {
@@ -750,7 +1068,28 @@
     ctx.restore();
   }
 
+  function drawHouseEnemy(o) {
+    const img = houseEnemyImgs[o.kind];
+    const drawH = o.kind === "eye" ? o.r * 2.5 : o.kind === "ghostBig" ? o.r * 2.6 : o.r * 2.4;
+    const drawW = img ? (img.width / img.height) * drawH : drawH;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(Math.sin(world.time * 2 + (o.bob || 0)) * 0.08);
+    if (img) ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    else {
+      ctx.fillStyle = o.kind === "eye" ? "#9b32e6" : "#ff5f28";
+      ctx.beginPath();
+      ctx.arc(0, 0, o.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawObstacle(o) {
+    if (o.kind === "eye" || o.kind === "ghostBig" || o.kind === "ghostSmall") {
+      drawHouseEnemy(o);
+      return;
+    }
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
@@ -846,6 +1185,30 @@
     ctx.translate(s.x, s.y);
     ctx.rotate(s.rot);
     const r = s.r;
+    if (s.candy) {
+      ctx.fillStyle = "#ff4d8a";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, r * 0.85, r * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#8a1040";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = "#ffe566";
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.95, 0);
+      ctx.lineTo(-r * 1.25, -r * 0.35);
+      ctx.lineTo(-r * 1.25, r * 0.35);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(r * 0.95, 0);
+      ctx.lineTo(r * 1.25, -r * 0.35);
+      ctx.lineTo(r * 1.25, r * 0.35);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
     ctx.beginPath();
     for (let i = 0; i < 5; i++) {
       const a = (i * 2 * Math.PI) / 5 - Math.PI / 2;
@@ -1022,11 +1385,14 @@
   document.getElementById("again").addEventListener("click", (e) => {
     e.preventDefault();
     ensureAudio();
+    skipNextIntro = true;
     startGame();
   });
   document.getElementById("change").addEventListener("click", (e) => {
     e.preventDefault();
-    showModeSelect();
+    const wasHouse = campaign === "house";
+    if (wasHouse) showHousePlayers();
+    else showModeSelect();
     elOver.hidden = true;
     elHud.hidden = true;
     elHint.hidden = true;
@@ -1035,14 +1401,28 @@
   });
 
   function showModeSelect() {
+    campaign = "classic";
     pickStep = "mode";
     chosen = { p1: null, p2: null };
     elModes.hidden = false;
     elCards.hidden = true;
     elPrompt.hidden = true;
     elBack.hidden = true;
+    document.getElementById("modeHouse").hidden = false;
     elTagline.textContent = "Fly & dodge — pick a mode!";
     elPrompt.className = "pick-prompt";
+  }
+
+  function showHousePlayers() {
+    campaign = "house";
+    pickStep = "house-players";
+    chosen = { p1: null, p2: null };
+    elModes.hidden = false;
+    elCards.hidden = true;
+    elPrompt.hidden = true;
+    elBack.hidden = false;
+    document.getElementById("modeHouse").hidden = true;
+    elTagline.textContent = "The Big House — 1 or 2 players?";
   }
 
   function showPick(step) {
@@ -1051,7 +1431,12 @@
     elCards.hidden = false;
     elPrompt.hidden = false;
     elBack.hidden = false;
-    elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
+    renderCards();
+    if (campaign === "house") {
+      elTagline.textContent = "The Big House — pick a hero!";
+    } else {
+      elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
+    }
     if (mode === 1) {
       elPrompt.textContent = "Pick your buddy!";
       elPrompt.className = "pick-prompt";
@@ -1063,6 +1448,26 @@
       elPrompt.className = "pick-prompt p2-pick";
     }
     refreshCards();
+  }
+
+  function renderCards() {
+    elCards.innerHTML = "";
+    for (const c of roster()) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "card";
+      btn.dataset.id = c.id;
+      btn.setAttribute("aria-label", "Play as " + c.name);
+      const img = document.createElement("img");
+      img.alt = c.name;
+      img.src = c.thumb || c.src;
+      const label = document.createElement("span");
+      label.textContent = c.name;
+      btn.appendChild(img);
+      btn.appendChild(label);
+      btn.addEventListener("click", () => pickChar(c));
+      elCards.appendChild(btn);
+    }
   }
 
   function refreshCards() {
@@ -1084,16 +1489,23 @@
 
   document.getElementById("mode1").addEventListener("click", () => {
     ensureAudio();
+    if (pickStep !== "house-players") campaign = "classic";
     mode = 1;
     showPick("p1");
   });
   document.getElementById("mode2").addEventListener("click", () => {
     ensureAudio();
+    if (pickStep !== "house-players") campaign = "classic";
     mode = 2;
     showPick("p1");
   });
+  document.getElementById("modeHouse").addEventListener("click", () => {
+    ensureAudio();
+    showHousePlayers();
+  });
   elBack.addEventListener("click", () => {
     if (pickStep === "p2") showPick("p1");
+    else if (pickStep === "p1" && campaign === "house") showHousePlayers();
     else showModeSelect();
   });
 
@@ -1117,33 +1529,19 @@
     seedClouds();
     try {
       const tickleP = loadImage("assets/tickle.png").then((img) => { tickleImg = img; });
+      const housePs = Object.keys(HOUSE_ENEMY_SRCS).map((k) =>
+        loadImage(HOUSE_ENEMY_SRCS[k]).then((img) => { houseEnemyImgs[k] = img; })
+      );
+      const houseChars = HOUSE_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
       await Promise.all(CHARS.map(async (c) => {
         c.image = await loadImage(c.src);
         if (c.flame) c.flameImg = await loadImage(c.flame);
         if (c.thumb) c.thumbImg = await loadImage(c.thumb);
-      }).concat([tickleP]));
+      }).concat([tickleP]).concat(housePs).concat(houseChars));
     } catch (err) {
       elLoading.textContent = "Could not load pictures. Try refreshing.";
       console.error(err);
       return;
-    }
-
-    elCards.innerHTML = "";
-    for (const c of CHARS) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "card";
-      btn.dataset.id = c.id;
-      btn.setAttribute("aria-label", "Play as " + c.name);
-      const img = document.createElement("img");
-      img.alt = c.name;
-      img.src = c.thumb || c.src;
-      const label = document.createElement("span");
-      label.textContent = c.name;
-      btn.appendChild(img);
-      btn.appendChild(label);
-      btn.addEventListener("click", () => pickChar(c));
-      elCards.appendChild(btn);
     }
 
     elLoading.classList.add("hidden");
@@ -1178,6 +1576,17 @@
       },
       ready: true,
       spawnTickle: (x, y) => spawnTickle(x, y),
+      startHouse: (id) => {
+        campaign = "house";
+        mode = 1;
+        chosen.p1 = HOUSE_CHARS.find((x) => x.id === id) || HOUSE_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = true;
+        startGame();
+        world.obstacles.push({ x: W * 0.62, y: H * 0.42, r: 48, kind: "eye", rot: 0, passed: false, bob: 1 });
+        world.obstacles.push({ x: W * 0.72, y: H * 0.68, r: 40, kind: "ghostBig", rot: 0, passed: false, bob: 2 });
+        world.stars.push({ x: W * 0.55, y: H * 0.28, r: 18, rot: 0.4, candy: true });
+      },
       getState: () => state,
       getScore: () => (world.players[0] ? world.players[0].score : 0),
       getScore2: () => (world.players[1] ? world.players[1].score : 0),

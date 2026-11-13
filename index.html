@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Turbo Buddies</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game" width="390" height="844"></canvas>
+
+  <div id="hud" hidden>
+    <div id="hud-p1" class="hud-side p1">
+      <div class="hud-tag">P1</div>
+      <div class="hearts" id="hearts-p1" aria-label="P1 lives"></div>
+      <div class="pscore" id="score-p1">0</div>
+    </div>
+    <div id="hud-mid" class="hud-mid"></div>
+    <div id="hud-p2" class="hud-side p2" hidden>
+      <div class="hud-tag">P2</div>
+      <div class="hearts" id="hearts-p2" aria-label="P2 lives"></div>
+      <div class="pscore" id="score-p2">0</div>
+    </div>
+  </div>
+
+  <div id="hint" hidden>HOLD TO FLY!</div>
+
+  <div id="start" class="screen">
+    <h1>Turbo Buddies</h1>
+    <p class="tagline" id="tagline">Fly &amp; dodge — pick a mode!</p>
+    <div id="modes" class="modes">
+      <button type="button" id="mode1" class="mode-btn">1 Player</button>
+      <button type="button" id="mode2" class="mode-btn mode-2p">2 Players</button>
+    </div>
+    <p class="pick-prompt" id="pick-prompt" hidden>Pick your buddy!</p>
+    <div id="cards" class="cards" hidden></div>
+    <button type="button" id="back-mode" class="text-back" hidden>← Back</button>
+  </div>
+
+  <div id="over" class="screen" hidden>
+    <div class="panel">
+      <h2 id="over-title">Game Over!</h2>
+      <div id="over-1p">
+        <p class="score-line">Score: <span id="over-score">0</span></p>
+        <p class="best-line">Best: <span id="over-best">0</span></p>
+      </div>
+      <div id="over-2p" hidden>
+        <p class="vs-line p1"><span class="hud-tag">P1</span> <span id="over-s1">0</span></p>
+        <p class="vs-line p2"><span class="hud-tag">P2</span> <span id="over-s2">0</span></p>
+      </div>
+      <button id="again" type="button">Play again</button>
+      <button id="change" type="button" class="secondary">Change buddy</button>
+    </div>
+  </div>
+
+  <div id="loading">Loading buddies…</div>
+
+  <script src="game.js"></script>
+</body>
+</html>

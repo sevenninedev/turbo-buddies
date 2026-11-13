@@ -51,6 +51,7 @@
     { name: "Hallway", kind: "house", goalDist: 5200, spawnScale: 1.3 },
     { name: "Eye Boss", kind: "boss" },
     { name: "The Big Chase", kind: "chase", goalDist: 5200, spawnScale: 1.1 },
+    { name: "Parkour House", kind: "parkour", goalDist: 5600, spawnScale: 1 },
   ];
   const START_CHARS = ["frog", "ape", "gorilla"];
   const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike", 6: "money", 7: "skater" };
@@ -61,7 +62,7 @@
   function allBuddies() { return CHARS.concat(HOUSE_CHARS, CHASE_CHARS); }
   function roster() {
     if (campaign === "house") return HOUSE_CHARS;
-    if (campaign === "chase") return CHASE_CHARS;
+    if (campaign === "chase" || campaign === "parkour") return CHASE_CHARS;
     if (campaign === "adventure") return allBuddies();
     return CHARS;
   }
@@ -70,8 +71,11 @@
   function isChaseMode() {
     return campaign === "chase" || (campaign === "adventure" && levelKind === "chase");
   }
+  function isParkourMode() {
+    return campaign === "parkour" || (campaign === "adventure" && levelKind === "parkour");
+  }
   function isGroundMode() {
-    return campaign === "house" || isChaseMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
+    return campaign === "house" || isChaseMode() || isParkourMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
   }
   function isYardMode() {
     return campaign === "house" || (campaign === "adventure" && levelKind === "yard");
@@ -81,7 +85,7 @@
   }
 
   function defaultAdv() {
-    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
+    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
   }
   function loadAdv() {
     try {
@@ -90,16 +94,18 @@
       const d = JSON.parse(raw);
       const base = defaultAdv();
       if (!Array.isArray(d.stars)) d.stars = base.stars;
-      else if (d.stars.length === 7) d.stars = d.stars.concat([0]);
-      else if (d.stars.length !== 8) d.stars = base.stars;
+      else if (d.stars.length < 9) d.stars = d.stars.concat([0, 0, 0, 0, 0].slice(0, 9 - d.stars.length));
+      else if (d.stars.length !== 9) d.stars = base.stars;
       if (!Array.isArray(d.chars) || !d.chars.length) d.chars = base.chars;
-      d.unlockedThrough = Math.max(1, Math.min(8, d.unlockedThrough || 1));
-      // already beat the old final boss? unlock the new chase level and Money
+      d.unlockedThrough = Math.max(1, Math.min(9, d.unlockedThrough || 1));
       if ((d.stars[6] || 0) > 0) {
         d.unlockedThrough = Math.max(d.unlockedThrough, 8);
         if (d.chars.indexOf("money") === -1) d.chars.push("money");
       }
-      if ((d.stars[7] || 0) > 0 && d.chars.indexOf("skater") === -1) d.chars.push("skater");
+      if ((d.stars[7] || 0) > 0) {
+        d.unlockedThrough = Math.max(d.unlockedThrough, 9);
+        if (d.chars.indexOf("skater") === -1) d.chars.push("skater");
+      }
       return d;
     } catch (e) { return defaultAdv(); }
   }
@@ -293,7 +299,7 @@
 
   function placePlayers() {
     const list = world.players;
-    if (isChaseMode()) {
+    if (isChaseMode() || isParkourMode()) {
       if (list.length === 1) list[0].x = clamp(W * 0.58, 170, 240);
       else if (list.length >= 2) {
         list[0].x = clamp(W * 0.50, 150, 210);
@@ -324,6 +330,7 @@
     world.popups = [];
     world.tickles = [];
     world.platforms = [];
+    world.ladders = [];
     world.spawnT = 1.1;
     world.tickleT = 5.2;
     world.shake = 0;
@@ -373,6 +380,8 @@
         : '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
     } else if (campaign === "adventure" && levelKind === "boss") {
       elHint.textContent = "JUMP ON THE EYE!";
+    } else if (isParkourMode()) {
+      elHint.textContent = "TAP TO JUMP! Climb the ladders!";
     } else if (isChaseMode()) {
       elHint.textContent = "TAP TO JUMP! Get away!";
     } else if (isGroundMode()) {
@@ -405,6 +414,8 @@
         setupBossLevel();
       } else if (isChaseMode()) {
         setupChase();
+      } else if (isParkourMode()) {
+        setupParkour();
       } else if (!world.platforms.length) {
         const fy = houseFloorTop();
         world.platforms.push(makeHousePlatform("sofa", W * 0.58, fy - 44));
@@ -533,7 +544,7 @@
     }
     if (mode === 1) {
       let mid = p1 ? '<div class="pscore">' + p1.score + "</div>" : "";
-      if ((campaign === "adventure" || isChaseMode()) && world.goalDist && p1) {
+      if ((campaign === "adventure" || isChaseMode() || isParkourMode()) && world.goalDist && p1) {
         const pct = Math.max(0, Math.min(100, (world.dist / world.goalDist) * 100));
         mid += '<div class="adv-progress"><div class="bar-bg"><div class="bar-fg" style="width:' + pct + '%"></div></div></div>';
       }
@@ -900,12 +911,13 @@
 
   function tryJump(p) {
     if (!p || p.ghost) return false;
-    if (!(p.jumpBuf > 0) || !(p.coyote > 0)) return false;
-    p.vy = isChaseMode() ? -680 : -720;
+    if (!(p.jumpBuf > 0) || (!(p.coyote > 0) && !p.climbing)) return false;
+    p.climbing = false;
+    p.vy = isChaseMode() ? -680 : (isParkourMode() ? -700 : -720);
     p.coyote = 0;
     p.jumpBuf = 0;
     p.onGround = false;
-    if (isChaseMode()) {
+    if (isChaseMode() || isParkourMode()) {
       const { drawH } = playerSize(p);
       for (let i = 0; i < 5; i++) {
         world.particles.push({
@@ -929,12 +941,16 @@
     } else {
       world.speed = 150 + Math.min(160, world.dist / 40);
     }
+    if (isParkourMode() && world.players.some((pl) => pl.climbing)) world.speed = Math.min(world.speed, 75);
     const sp = world.speed * dt;
     world.dist += sp;
-    const GRAVITY = isChaseMode() ? 1080 : 1850;
+    const GRAVITY = isChaseMode() ? 1080 : (isParkourMode() ? 1500 : 1850);
     const floor = houseFloorTop();
 
     for (const p of world.players) {
+      if (isParkourMode() && updateParkourClimb(p, dt)) {
+        // climbing: motion handled in updateParkourClimb
+      } else {
       p.vy += GRAVITY * dt;
       p.vy = isChaseMode() ? clamp(p.vy, -780, 540) : clamp(p.vy, -900, 980);
       p.y += p.vy * dt;
@@ -958,7 +974,8 @@
           p.onGround = true;
         }
       }
-      if (p.onGround) p.coyote = 0.14;
+      } // end non-climb physics
+      if (p.onGround || p.climbing) p.coyote = 0.14;
       else p.coyote = Math.max(0, (p.coyote || 0) - dt);
       if (p.jumpBuf > 0) {
         p.jumpBuf -= dt;
@@ -980,11 +997,15 @@
     world.spawnT -= dt;
     const interval = Math.max(0.95, 1.9 - world.dist / 7000) / (world.spawnScale || 1);
     if (world.spawnT <= 0) {
-      if (isChaseMode()) spawnChaseWave();
+      if (isParkourMode()) { /* course is pre-spawned / extended below */ }
+      else if (isChaseMode()) spawnChaseWave();
       else spawnHouseWave();
       world.spawnT = interval;
     }
-    if (isChaseMode()) { updateChasers(dt); scrollDecor(dt, world.speed); }
+    if (isParkourMode()) {
+      updateParkourCourse(dt, sp);
+      updateChasers(dt);
+    } else if (isChaseMode()) { updateChasers(dt); scrollDecor(dt, world.speed); }
 
     for (const o of world.obstacles) {
       o.x -= sp + (o.walk || 0) * dt;
@@ -1032,6 +1053,7 @@
     }
     world.obstacles = world.obstacles.filter((o) => o.x > -120 && !o.dead);
     world.platforms = world.platforms.filter((pl) => pl.x + pl.w > -50);
+    if (world.ladders) world.ladders = world.ladders.filter((l) => l.x + (l.w || 30) > -50);
 
     for (const s of world.stars) {
       if (s.got) continue;
@@ -1114,6 +1136,401 @@
         r: 16, rot: rand(0, 6), coin: true,
       });
     }
+  }
+
+
+  function parkourLevels() {
+    const fy = houseFloorTop();
+    return { fy, mid: fy - 128, high: fy - 250 };
+  }
+
+  function setupParkour() {
+    world.platforms = [];
+    world.ladders = [];
+    world.stars = world.stars || [];
+    world.chaseGap = 100;
+    world.chaseHitT = 0;
+    world.parkourI = 0;
+    if (!world.goalDist) world.goalDist = 5600;
+    const fy = houseFloorTop();
+    for (const p of world.players) {
+      p.climbing = false;
+      standOnFloor(p, fy);
+    }
+    placePlayers();
+    let x = W * 0.72;
+    for (let i = 0; i < 6; i++) {
+      x = spawnParkourSeg(x, i);
+      world.parkourI = i + 1;
+    }
+    world.parkourX = x;
+  }
+
+  function coinAt(x, y) {
+    world.stars.push({ x, y, r: 16, rot: rand(0, 6), coin: true });
+  }
+
+  function spawnParkourSeg(x, i) {
+    const { fy, mid, high } = parkourLevels();
+    const pat = i % 8;
+    function plat(kind, px, py, w, h) {
+      world.platforms.push({ kind, x: px, y: py, w, h: h || 18 });
+    }
+    function lad(lx, top, bot) {
+      world.ladders.push({ x: lx, w: 32, top, bot, y: top, h: bot - top });
+    }
+    let w = 260;
+    if (pat === 0) {
+      plat("shelf", x + 36, mid, 210, 18);
+      lad(x + 48, mid, fy);
+      coinAt(x + 120, mid - 36);
+      coinAt(x + 170, mid - 36);
+      w = 270;
+    } else if (pat === 1) {
+      plat("table", x, mid, 96, 22);
+      plat("shelf", x + 170, mid, 120, 18);
+      coinAt(x + 132, mid - 70);
+      coinAt(x + 132, mid - 108);
+      w = 310;
+    } else if (pat === 2) {
+      plat("stair", x, fy - 44, 58, 16);
+      plat("stair", x + 50, fy - 88, 58, 16);
+      plat("shelf", x + 100, mid, 86, 18);
+      lad(x + 170, high, mid);
+      plat("attic", x + 155, high, 190, 18);
+      coinAt(x + 210, high - 36);
+      coinAt(x + 255, high - 36);
+      w = 360;
+    } else if (pat === 3) {
+      plat("sill", x + 16, high, 74, 14);
+      plat("sill", x + 140, high, 74, 14);
+      plat("shelf", x + 250, mid, 130, 18);
+      lad(x + 270, mid, fy);
+      coinAt(x + 50, high - 34);
+      coinAt(x + 174, high - 34);
+      w = 400;
+    } else if (pat === 4) {
+      lad(x + 24, mid, fy);
+      plat("shelf", x + 10, mid, 110, 18);
+      lad(x + 100, high, mid);
+      plat("attic", x + 86, high, 170, 18);
+      coinAt(x + 140, high - 36);
+      coinAt(x + 190, high - 36);
+      w = 280;
+    } else if (pat === 5) {
+      plat("sofa", x, fy - 46, 108, 46);
+      plat("table", x + 150, fy - 38, 86, 38);
+      plat("shelf", x + 70, mid, 170, 18);
+      lad(x + 86, mid, fy - 46);
+      coinAt(x + 130, mid - 36);
+      coinAt(x + 180, mid - 36);
+      w = 320;
+    } else if (pat === 6) {
+      lad(x + 16, high, fy);
+      plat("attic", x + 6, high, 230, 18);
+      coinAt(x + 70, high - 36);
+      coinAt(x + 120, high - 36);
+      coinAt(x + 170, high - 36);
+      w = 300;
+    } else {
+      plat("shelf", x, mid, 110, 18);
+      plat("sill", x + 180, high, 86, 14);
+      plat("shelf", x + 300, mid, 100, 18);
+      lad(x + 314, mid, fy);
+      coinAt(x + 220, high - 34);
+      w = 420;
+    }
+    return x + w + 24;
+  }
+
+  function updateParkourCourse(dt, sp) {
+    for (const lad of (world.ladders || [])) lad.x -= sp;
+    world.parkourX = (world.parkourX || W) - sp;
+    const remain = (world.goalDist || 5600) - world.dist;
+    while (world.parkourX < W + 220 && remain > 420) {
+      world.parkourX = spawnParkourSeg(world.parkourX, world.parkourI++);
+    }
+  }
+
+  function updateParkourClimb(p, dt) {
+    if (p.ghost) return false;
+    const { drawW, drawH } = playerSize(p);
+    const half = drawW * 0.28;
+    const feet = p.y + drawH * 0.48;
+    const lad = (world.ladders || []).find((l) =>
+      p.x + half > l.x - 10 && p.x - half < l.x + l.w + 10 &&
+      feet > l.top + 4 && feet < l.bot + 18
+    );
+    if (!lad) {
+      p.climbing = false;
+      return false;
+    }
+    // jumping off the ladder
+    if (p.jumpBuf > 0) {
+      p.climbing = false;
+      p.coyote = 0.14;
+      return false;
+    }
+    p.climbing = true;
+    p.coyote = 0.16;
+    if (feet <= lad.top + 12) {
+      p.y = lad.top - drawH * 0.48;
+      p.vy = 0;
+      p.onGround = true;
+      p.climbing = false;
+      return true;
+    }
+    p.vy = -380;
+    p.y += p.vy * dt;
+    p.onGround = false;
+    // sparkle while climbing
+    if (Math.random() < 0.4) {
+      world.particles.push({
+        x: p.x + rand(-10, 10),
+        y: feet,
+        vx: rand(-20, 20),
+        vy: rand(10, 40),
+        t: 0, life: 0.3, r: rand(2, 5),
+        kind: "sparkle", color: "#ffe566",
+      });
+    }
+    return true;
+  }
+
+  function drawParkourHouse() {
+    const fy = houseFloorTop();
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#fff4c8");
+    g.addColorStop(0.55, "#ffe9a8");
+    g.addColorStop(1, "#f0d48a");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    // wallpaper dots
+    ctx.fillStyle = "rgba(255, 200, 80, 0.28)";
+    const off = world.dist * 0.25;
+    for (let y = 30; y < fy - 8; y += 36) {
+      for (let x = -20; x < W + 20; x += 36) {
+        ctx.beginPath();
+        ctx.arc((x - (off % 36)), y, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // windows + sun rays, scrolling with the house
+    const winW = 86, winH = 110;
+    const span = 340;
+    const base = -((world.dist * 0.85) % span);
+    for (let i = -1; i < 4; i++) {
+      const wx = base + i * span + 40;
+      const wy = 96;
+      // sky in the window
+      const sky = ctx.createLinearGradient(wx, wy, wx, wy + winH);
+      sky.addColorStop(0, "#9ad8ff");
+      sky.addColorStop(1, "#e8f7ff");
+      ctx.fillStyle = sky;
+      ctx.fillRect(wx, wy, winW, winH);
+      ctx.fillStyle = "#ffe566";
+      ctx.beginPath();
+      ctx.arc(wx + 62, wy + 28, 14, 0, Math.PI * 2);
+      ctx.fill();
+      // frame
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 8;
+      ctx.strokeRect(wx, wy, winW, winH);
+      ctx.strokeStyle = "#e8b84a";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(wx, wy, winW, winH);
+      ctx.beginPath();
+      ctx.moveTo(wx + winW / 2, wy);
+      ctx.lineTo(wx + winW / 2, wy + winH);
+      ctx.moveTo(wx, wy + winH / 2);
+      ctx.lineTo(wx + winW, wy + winH / 2);
+      ctx.stroke();
+      // light rays
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(wx + 8, wy + winH);
+      ctx.lineTo(wx + winW - 8, wy + winH);
+      ctx.lineTo(wx + winW + 70, fy);
+      ctx.lineTo(wx - 20, fy);
+      ctx.closePath();
+      const ray = ctx.createLinearGradient(wx, wy + winH, wx + 30, fy);
+      ray.addColorStop(0, "rgba(255,250,200,0.35)");
+      ray.addColorStop(1, "rgba(255,250,200,0)");
+      ctx.fillStyle = ray;
+      ctx.fill();
+      ctx.restore();
+    }
+    // wooden floor
+    const floorG = ctx.createLinearGradient(0, fy, 0, H);
+    floorG.addColorStop(0, "#f3d58a");
+    floorG.addColorStop(1, "#d4a85a");
+    ctx.fillStyle = floorG;
+    ctx.fillRect(-20, fy, W + 40, H - fy + 40);
+    ctx.strokeStyle = "rgba(160, 110, 40, 0.25)";
+    ctx.lineWidth = 2;
+    const plank = -((world.dist * 0.8) % 44);
+    for (let x = plank - 40; x < W + 40; x += 44) {
+      ctx.beginPath();
+      ctx.moveTo(x, fy);
+      ctx.lineTo(x, H + 10);
+      ctx.stroke();
+    }
+    // sunny baseboard
+    ctx.fillStyle = "#ffe7a0";
+    ctx.fillRect(-20, fy - 10, W + 40, 12);
+    ctx.fillStyle = "#e8c86a";
+    ctx.fillRect(-20, fy - 2, W + 40, 4);
+  }
+
+  function drawParkourPlatform(pl) {
+    const { x, y, w, h, kind } = pl;
+    ctx.save();
+    if (kind === "sofa") {
+      ctx.fillStyle = "#ff8ab8";
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 10);
+        ctx.fill();
+      } else ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = "#ffd0e4";
+      ctx.fillRect(x + 8, y + 4, w - 16, 8);
+      ctx.strokeStyle = "#c04a78";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, w, h);
+    } else if (kind === "table") {
+      ctx.fillStyle = "#ffb347";
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, 14, 5);
+        ctx.fill();
+      } else ctx.fillRect(x, y, w, 14);
+      ctx.fillStyle = "#e09020";
+      ctx.fillRect(x + 8, y + 14, 8, h);
+      ctx.fillRect(x + w - 16, y + 14, 8, h);
+      ctx.strokeStyle = "#b36a10";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, 14);
+    } else if (kind === "sill") {
+      ctx.fillStyle = "#fffaf0";
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = "#c8e9ff";
+      ctx.fillRect(x + 4, y - 36, w - 8, 36);
+      ctx.strokeStyle = "#e8c86a";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y - 36, w, 36 + h);
+      // shine
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.fillRect(x + 6, y + 2, w * 0.4, 4);
+    } else {
+      // shelf / stair / attic — shiny wood
+      const col = kind === "attic" ? "#d4a05a" : kind === "stair" ? "#f0c878" : "#ffd27a";
+      ctx.fillStyle = col;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 6);
+        ctx.fill();
+      } else ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.fillRect(x + 4, y + 2, w * 0.45, 5);
+      ctx.strokeStyle = "#b07a28";
+      ctx.lineWidth = 3;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 6);
+        ctx.stroke();
+      } else ctx.strokeRect(x, y, w, h);
+      if (kind !== "stair") {
+        ctx.fillStyle = "#c98930";
+        ctx.beginPath();
+        ctx.moveTo(x + 10, y + h);
+        ctx.lineTo(x + 18, y + h + 14);
+        ctx.lineTo(x + 26, y + h);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x + w - 26, y + h);
+        ctx.lineTo(x + w - 18, y + h + 14);
+        ctx.lineTo(x + w - 10, y + h);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawLadder(lad) {
+    const x = lad.x, w = lad.w || 32, top = lad.top, bot = lad.bot;
+    ctx.save();
+    // glow
+    const glow = ctx.createLinearGradient(x - 8, top, x + w + 8, top);
+    glow.addColorStop(0, "rgba(255,220,80,0)");
+    glow.addColorStop(0.5, "rgba(255,230,80,0.45)");
+    glow.addColorStop(1, "rgba(255,220,80,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(x - 10, top - 4, w + 20, bot - top + 8);
+    // rails
+    const rail = ctx.createLinearGradient(x, top, x + 6, top);
+    rail.addColorStop(0, "#fff6c0");
+    rail.addColorStop(0.4, "#ffd24a");
+    rail.addColorStop(1, "#c98900");
+    ctx.fillStyle = rail;
+    ctx.fillRect(x, top, 7, bot - top);
+    ctx.fillRect(x + w - 7, top, 7, bot - top);
+    ctx.strokeStyle = "#8a5a00";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x, top, 7, bot - top);
+    ctx.strokeRect(x + w - 7, top, 7, bot - top);
+    // shiny rungs
+    for (let y = top + 14; y < bot - 6; y += 18) {
+      const rg = ctx.createLinearGradient(x, y, x + w, y);
+      rg.addColorStop(0, "#c98900");
+      rg.addColorStop(0.45, "#fff4b0");
+      rg.addColorStop(1, "#c98900");
+      ctx.fillStyle = rg;
+      ctx.fillRect(x, y, w, 5);
+      ctx.strokeStyle = "#8a5a00";
+      ctx.strokeRect(x, y, w, 5);
+    }
+    ctx.restore();
+  }
+
+  function drawParkourDoor() {
+    if (!world.goalDist) return;
+    const px = world.players[0] ? world.players[0].x : W * 0.58;
+    const fx = px + (world.goalDist - world.dist);
+    if (fx > W + 80 || fx < -80) return;
+    const fy = houseFloorTop();
+    const dw = 70, dh = 110;
+    const dx = fx - dw / 2, dy = fy - dh;
+    // glow
+    ctx.fillStyle = "rgba(255, 220, 80, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(fx, fy - dh / 2, 50, 70, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ff8a3a";
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(dx, dy, dw, dh, 8);
+      ctx.fill();
+    } else ctx.fillRect(dx, dy, dw, dh);
+    ctx.fillStyle = "#ffe566";
+    ctx.fillRect(dx + 10, dy + 14, 20, 28);
+    ctx.fillRect(dx + 40, dy + 14, 20, 28);
+    ctx.fillRect(dx + 10, dy + 52, 20, 28);
+    ctx.fillRect(dx + 40, dy + 52, 20, 28);
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath();
+    ctx.arc(dx + dw - 16, dy + dh / 2, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#9a3a00";
+    ctx.lineWidth = 3;
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(dx, dy, dw, dh, 8);
+      ctx.stroke();
+    } else ctx.strokeRect(dx, dy, dw, dh);
+    ctx.fillStyle = "#3a2100";
+    ctx.font = "800 14px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("FINISH", fx, dy - 8);
   }
 
   function updateChasers(dt) {
@@ -1519,6 +1936,8 @@
     }
     if (state === "yard" || state === "intro") {
       drawHouseOutside();
+    } else if (isParkourMode()) {
+      drawParkourHouse();
     } else if (isChaseMode()) {
       drawChaseScene();
     } else if (isGroundMode()) {
@@ -1562,15 +1981,19 @@
     }
 
     if (state === "play" || state === "over") {
-      if (isGroundMode()) {
+      if (isParkourMode()) {
+        for (const pl of world.platforms) drawParkourPlatform(pl);
+        for (const lad of (world.ladders || [])) drawLadder(lad);
+        drawParkourDoor();
+      } else if (isGroundMode()) {
         for (const pl of world.platforms) drawHousePlatform(pl);
       }
-      if (campaign === "adventure" && world.goalDist) drawFinishLine();
+      if (campaign === "adventure" && world.goalDist && !isParkourMode()) drawFinishLine();
       for (const o of world.obstacles) drawObstacle(o);
       for (const st of world.stars) if (!st.got) drawStar(st);
       for (const part of world.particles) drawParticle(part);
       if (isSkyMode()) for (const tk of world.tickles) drawTickle(tk);
-      if (isChaseMode()) drawChasers();
+      if (isChaseMode() || isParkourMode()) drawChasers();
       for (const plr of world.players) drawPlayer(plr);
       for (const pop of world.popups) {
         ctx.save();
@@ -2546,6 +2969,7 @@
     const wasHouse = campaign === "house";
     if (wasHouse) showHousePlayers();
     else if (campaign === "chase") showChasePick();
+    else if (campaign === "parkour") showParkourPick();
     else showModeSelect();
     elOver.hidden = true;
     elHud.hidden = true;
@@ -2565,6 +2989,8 @@
     document.getElementById("modeHouse").hidden = false;
     const chaseBtn = document.getElementById("modeChase");
     if (chaseBtn) chaseBtn.hidden = false;
+    const parkBtn = document.getElementById("modeParkour");
+    if (parkBtn) parkBtn.hidden = false;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = false;
     const free = document.querySelector(".free-play-label");
@@ -2584,6 +3010,8 @@
     document.getElementById("modeHouse").hidden = true;
     const chaseBtn = document.getElementById("modeChase");
     if (chaseBtn) chaseBtn.hidden = true;
+    const parkBtn = document.getElementById("modeParkour");
+    if (parkBtn) parkBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -2603,11 +3031,38 @@
     document.getElementById("modeHouse").hidden = true;
     const chaseBtn = document.getElementById("modeChase");
     if (chaseBtn) chaseBtn.hidden = true;
+    const parkBtn = document.getElementById("modeParkour");
+    if (parkBtn) parkBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
     if (free) free.hidden = true;
     elTagline.textContent = "The Big Chase — pick a buddy!";
+    elPrompt.textContent = "Pick your buddy!";
+    elPrompt.className = "pick-prompt";
+    renderCards();
+    refreshCards();
+  }
+
+  function showParkourPick() {
+    campaign = "parkour";
+    mode = 1;
+    pickStep = "p1";
+    chosen = { p1: null, p2: null };
+    elModes.hidden = true;
+    elCards.hidden = false;
+    elPrompt.hidden = false;
+    elBack.hidden = false;
+    document.getElementById("modeHouse").hidden = true;
+    const chaseBtn = document.getElementById("modeChase");
+    if (chaseBtn) chaseBtn.hidden = true;
+    const parkBtn = document.getElementById("modeParkour");
+    if (parkBtn) parkBtn.hidden = true;
+    const advBtn = document.getElementById("modeAdventure");
+    if (advBtn) advBtn.hidden = true;
+    const free = document.querySelector(".free-play-label");
+    if (free) free.hidden = true;
+    elTagline.textContent = "Parkour House — pick a buddy!";
     elPrompt.textContent = "Pick your buddy!";
     elPrompt.className = "pick-prompt";
     renderCards();
@@ -2628,6 +3083,8 @@
       elTagline.textContent = "The Big House — pick a hero!";
     } else if (campaign === "chase") {
       elTagline.textContent = "The Big Chase — pick a buddy!";
+    } else if (campaign === "parkour") {
+      elTagline.textContent = "Parkour House — pick a buddy!";
     } else {
       elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
     }
@@ -2710,6 +3167,10 @@
   document.getElementById("modeChase").addEventListener("click", () => {
     ensureAudio();
     showChasePick();
+  });
+  document.getElementById("modeParkour").addEventListener("click", () => {
+    ensureAudio();
+    showParkourPick();
   });
   document.getElementById("modeAdventure").addEventListener("click", () => {
     ensureAudio();
@@ -2827,7 +3288,7 @@
       levelComplete();
       return;
     }
-    if (isChaseMode()) chaseFreeWin();
+    if (isChaseMode() || isParkourMode()) chaseFreeWin();
   }
 
   function chaseFreeWin() {
@@ -2839,7 +3300,7 @@
     elOver.hidden = false;
     const s = world.players[0] ? world.players[0].score : 0;
     const best = setBest(s);
-    elOverTitle.textContent = "You got away!";
+    elOverTitle.textContent = isParkourMode() ? "You made it!" : "You got away!";
     elOver1p.hidden = false;
     elOver2p.hidden = true;
     document.getElementById("over-score").textContent = String(s);
@@ -2873,7 +3334,7 @@
       const prev = advSave.stars[adventureLevel] || 0;
       advSave.stars[adventureLevel] = Math.max(prev, stars);
       if (advSave.unlockedThrough < adventureLevel + 2) {
-        advSave.unlockedThrough = Math.min(8, adventureLevel + 2);
+        advSave.unlockedThrough = Math.min(9, adventureLevel + 2);
       }
       const rewardId = UNLOCK_BY_LEVEL[adventureLevel];
       if (rewardId && advSave.chars.indexOf(rewardId) === -1) {
@@ -2928,7 +3389,7 @@
     campaign = "adventure";
     mode = 1;
     pickStep = "adv-pick";
-    if (ADV_LEVELS[index] && ADV_LEVELS[index].kind === "chase" && isCharUnlocked("money")) {
+    if (ADV_LEVELS[index] && (ADV_LEVELS[index].kind === "chase" || ADV_LEVELS[index].kind === "parkour") && isCharUnlocked("money")) {
       chosen.p1 = allBuddies().find((c) => c.id === "money") || chosen.p1;
     }
     if (!chosen.p1 || !isCharUnlocked(chosen.p1.id)) {
@@ -2997,16 +3458,17 @@
     ctx.fillStyle = "#3a7bdd";
     ctx.fillRect(hx - 6, hy + 18, 12, 18);
 
-    // winding path of 8 nodes
+    // winding path of 9 nodes
     const nodes = [
-      { x: 0.22, y: 0.88 },
-      { x: 0.70, y: 0.80 },
-      { x: 0.28, y: 0.70 },
-      { x: 0.72, y: 0.58 },
-      { x: 0.26, y: 0.48 },
-      { x: 0.68, y: 0.38 },
-      { x: 0.30, y: 0.28 },
-      { x: 0.64, y: 0.18 },
+      { x: 0.20, y: 0.90 },
+      { x: 0.70, y: 0.82 },
+      { x: 0.26, y: 0.72 },
+      { x: 0.74, y: 0.62 },
+      { x: 0.24, y: 0.52 },
+      { x: 0.70, y: 0.42 },
+      { x: 0.28, y: 0.32 },
+      { x: 0.68, y: 0.23 },
+      { x: 0.36, y: 0.14 },
     ];
     const pts = nodes.map((n) => ({ x: n.x * W, y: n.y * H }));
     ctx.lineWidth = 18;
@@ -3032,7 +3494,7 @@
       const pulse = (unlocked && i === advSave.unlockedThrough - 1) ? 1 + Math.sin(world.time * 4) * 0.08 : 1;
       const r = 28 * pulse;
       ctx.beginPath();
-      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
+      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 8 ? "#ffe566" : i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
       ctx.strokeStyle = "#16324a";
       ctx.lineWidth = 4;
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -3148,7 +3610,7 @@
   function showVictory() {
     if (state === "victory") return;
     world.levelDone = true;
-    if (advSave.unlockedThrough < 8) advSave.unlockedThrough = 8;
+    if (advSave.unlockedThrough < 9) advSave.unlockedThrough = 9;
     writeAdv();
     state = "victory";
     world.players.forEach((p) => { p.boosting = false; });
@@ -3240,7 +3702,7 @@
 
   function seedAdvShot() {
     advSave.unlockedThrough = 5;
-    advSave.stars = [3, 2, 3, 1, 0, 0, 0, 0];
+    advSave.stars = [3, 2, 3, 1, 0, 0, 0, 0, 0];
     advSave.chars = START_CHARS.concat(["yellow", "elk", "cg", "cap"]);
   }
 
@@ -3343,6 +3805,15 @@
       getSave: () => advSave,
       startChase: (id) => {
         campaign = "chase";
+        mode = 1;
+        chosen.p1 = CHASE_CHARS.find((x) => x.id === id) || CHASE_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = true;
+        startGame();
+        if (world.players[0]) world.players[0].invuln = 0;
+      },
+      startParkour: (id) => {
+        campaign = "parkour";
         mode = 1;
         chosen.p1 = CHASE_CHARS.find((x) => x.id === id) || CHASE_CHARS[0];
         chosen.p2 = null;

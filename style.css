@@ -201,6 +201,7 @@ h1 {
 .mode-btn.mode-house { background: #ffb347; color: #3a2100; }
 .mode-btn.mode-chase { background: #7ad7ff; color: #0a3050; }
 .mode-btn.mode-parkour { background: #ffe566; color: #3a2100; }
+.mode-btn.mode-west { background: #ffc14d; color: #3a2100; }
 .mode-btn.mode-adventure {
   font-size: 36px;
   padding: 22px 16px;
@@ -505,4 +506,29 @@ h1 {
   height: 100%;
   background: #7ed957;
   width: 0;
+}
+
+.lasso-btn {
+  position: fixed;
+  right: 14px;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  z-index: 4;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  appearance: none;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  color: #3a2100;
+  background: radial-gradient(circle at 35% 30%, #ffe9a0, #f0b429 60%, #d89220);
+  border: 5px solid #16324a;
+  box-shadow: 0 6px 0 #16324a, 0 0 22px rgba(255, 220, 80, 0.85);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.lasso-btn:active {
+  transform: translateY(5px);
+  box-shadow: 0 2px 0 #16324a, 0 0 16px rgba(255, 220, 80, 0.7);
 }

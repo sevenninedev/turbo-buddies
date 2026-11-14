@@ -33,9 +33,13 @@
   let tickle2Img = null;
   let spinnerImg = null;
   let skaterImg = null;
-  let campaign = "classic"; // classic | house | adventure | chase
+  const WEST_CHARS = [
+    { id: "sheriff", name: "Sheriff", src: "assets/sheriff.png" },
+  ];
+  let banditImg = null;
+  let campaign = "classic"; // classic | house | adventure | chase | parkour | west
   let skipNextIntro = false;
-  let levelKind = "sky"; // sky | yard | house | boss | chase
+  let levelKind = "sky"; // sky | yard | house | boss | chase | parkour | west
   let adventureLevel = 0; // 0-based
   let pendingLevel = 0;
   let muted = false;
@@ -52,17 +56,19 @@
     { name: "Eye Boss", kind: "boss" },
     { name: "The Big Chase", kind: "chase", goalDist: 5200, spawnScale: 1.1 },
     { name: "Parkour House", kind: "parkour", goalDist: 5600, spawnScale: 1 },
+    { name: "Wild West", kind: "west" },
   ];
   const START_CHARS = ["frog", "ape", "gorilla"];
-  const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike", 6: "money", 7: "skater" };
+  const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike", 6: "money", 7: "skater", 8: "sheriff" };
 
   let advSave = loadAdv();
   muted = !!advSave.muted;
 
-  function allBuddies() { return CHARS.concat(HOUSE_CHARS, CHASE_CHARS); }
+  function allBuddies() { return CHARS.concat(HOUSE_CHARS, CHASE_CHARS, WEST_CHARS); }
   function roster() {
     if (campaign === "house") return HOUSE_CHARS;
     if (campaign === "chase" || campaign === "parkour") return CHASE_CHARS;
+    if (campaign === "west") return WEST_CHARS;
     if (campaign === "adventure") return allBuddies();
     return CHARS;
   }
@@ -74,8 +80,11 @@
   function isParkourMode() {
     return campaign === "parkour" || (campaign === "adventure" && levelKind === "parkour");
   }
+  function isWestMode() {
+    return campaign === "west" || (campaign === "adventure" && levelKind === "west");
+  }
   function isGroundMode() {
-    return campaign === "house" || isChaseMode() || isParkourMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
+    return campaign === "house" || isChaseMode() || isParkourMode() || isWestMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
   }
   function isYardMode() {
     return campaign === "house" || (campaign === "adventure" && levelKind === "yard");
@@ -85,7 +94,7 @@
   }
 
   function defaultAdv() {
-    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
+    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
   }
   function loadAdv() {
     try {
@@ -94,10 +103,10 @@
       const d = JSON.parse(raw);
       const base = defaultAdv();
       if (!Array.isArray(d.stars)) d.stars = base.stars;
-      else if (d.stars.length < 9) d.stars = d.stars.concat([0, 0, 0, 0, 0].slice(0, 9 - d.stars.length));
-      else if (d.stars.length !== 9) d.stars = base.stars;
+      else if (d.stars.length < 10) d.stars = d.stars.concat([0, 0, 0, 0, 0, 0].slice(0, 10 - d.stars.length));
+      else if (d.stars.length > 10) d.stars = d.stars.slice(0, 10);
       if (!Array.isArray(d.chars) || !d.chars.length) d.chars = base.chars;
-      d.unlockedThrough = Math.max(1, Math.min(9, d.unlockedThrough || 1));
+      d.unlockedThrough = Math.max(1, Math.min(10, d.unlockedThrough || 1));
       if ((d.stars[6] || 0) > 0) {
         d.unlockedThrough = Math.max(d.unlockedThrough, 8);
         if (d.chars.indexOf("money") === -1) d.chars.push("money");
@@ -105,6 +114,10 @@
       if ((d.stars[7] || 0) > 0) {
         d.unlockedThrough = Math.max(d.unlockedThrough, 9);
         if (d.chars.indexOf("skater") === -1) d.chars.push("skater");
+      }
+      if ((d.stars[8] || 0) > 0) {
+        d.unlockedThrough = Math.max(d.unlockedThrough, 10);
+        if (d.chars.indexOf("sheriff") === -1) d.chars.push("sheriff");
       }
       return d;
     } catch (e) { return defaultAdv(); }
@@ -299,6 +312,10 @@
 
   function placePlayers() {
     const list = world.players;
+    if (isWestMode()) {
+      if (list.length) list[0].x = clamp(W * 0.32, 90, 150);
+      return;
+    }
     if (isChaseMode() || isParkourMode()) {
       if (list.length === 1) list[0].x = clamp(W * 0.58, 170, 240);
       else if (list.length >= 2) {
@@ -380,6 +397,8 @@
         : '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
     } else if (campaign === "adventure" && levelKind === "boss") {
       elHint.textContent = "JUMP ON THE EYE!";
+    } else if (isWestMode()) {
+      elHint.textContent = "TAP TO JUMP!";
     } else if (isParkourMode()) {
       elHint.textContent = "TAP TO JUMP! Climb the ladders!";
     } else if (isChaseMode()) {
@@ -416,6 +435,8 @@
         setupChase();
       } else if (isParkourMode()) {
         setupParkour();
+      } else if (isWestMode()) {
+        setupWest();
       } else if (!world.platforms.length) {
         const fy = houseFloorTop();
         world.platforms.push(makeHousePlatform("sofa", W * 0.58, fy - 44));
@@ -503,6 +524,7 @@
     pointers.clear();
     elHint.hidden = true;
     elOver.hidden = false;
+    setLassoBtn(false);
 
     if (mode === 1) {
       const s = world.players[0] ? world.players[0].score : 0;
@@ -544,7 +566,10 @@
     }
     if (mode === 1) {
       let mid = p1 ? '<div class="pscore">' + p1.score + "</div>" : "";
-      if ((campaign === "adventure" || isChaseMode() || isParkourMode()) && world.goalDist && p1) {
+      if (isWestMode() && p1) {
+        const hits = world.lassoHits || 0;
+        mid += '<div class="adv-progress" style="color:#fff;font-weight:800;text-align:right;text-shadow:0 2px 0 #16324a;margin-right:58px">Lasso ' + hits + "/3</div>";
+      } else if ((campaign === "adventure" || isChaseMode() || isParkourMode()) && world.goalDist && p1) {
         const pct = Math.max(0, Math.min(100, (world.dist / world.goalDist) * 100));
         mid += '<div class="adv-progress"><div class="bar-bg"><div class="bar-fg" style="width:' + pct + '%"></div></div></div>';
       }
@@ -913,11 +938,11 @@
     if (!p || p.ghost) return false;
     if (!(p.jumpBuf > 0) || (!(p.coyote > 0) && !p.climbing)) return false;
     p.climbing = false;
-    p.vy = isChaseMode() ? -680 : (isParkourMode() ? -700 : -720);
+    p.vy = isChaseMode() ? -680 : ((isParkourMode() || isWestMode()) ? -700 : -720);
     p.coyote = 0;
     p.jumpBuf = 0;
     p.onGround = false;
-    if (isChaseMode() || isParkourMode()) {
+    if (isChaseMode() || isParkourMode() || isWestMode()) {
       const { drawH } = playerSize(p);
       for (let i = 0; i < 5; i++) {
         world.particles.push({
@@ -941,10 +966,11 @@
     } else {
       world.speed = 150 + Math.min(160, world.dist / 40);
     }
+    if (isWestMode() && (world.capturing || world.westWon)) world.speed = 0;
     if (isParkourMode() && world.players.some((pl) => pl.climbing)) world.speed = Math.min(world.speed, 75);
     const sp = world.speed * dt;
     world.dist += sp;
-    const GRAVITY = isChaseMode() ? 1080 : (isParkourMode() ? 1500 : 1850);
+    const GRAVITY = isChaseMode() ? 1080 : ((isParkourMode() || isWestMode()) ? 1500 : 1850);
     const floor = houseFloorTop();
 
     for (const p of world.players) {
@@ -998,6 +1024,7 @@
     const interval = Math.max(0.95, 1.9 - world.dist / 7000) / (world.spawnScale || 1);
     if (world.spawnT <= 0) {
       if (isParkourMode()) { /* course is pre-spawned / extended below */ }
+      else if (isWestMode()) spawnWestWave();
       else if (isChaseMode()) spawnChaseWave();
       else spawnHouseWave();
       world.spawnT = interval;
@@ -1005,7 +1032,8 @@
     if (isParkourMode()) {
       updateParkourCourse(dt, sp);
       updateChasers(dt);
-    } else if (isChaseMode()) { updateChasers(dt); scrollDecor(dt, world.speed); }
+    } else if (isWestMode()) { updateWest(dt, sp); }
+    else if (isChaseMode()) { updateChasers(dt); scrollDecor(dt, world.speed); }
 
     for (const o of world.obstacles) {
       o.x -= sp + (o.walk || 0) * dt;
@@ -1087,6 +1115,517 @@
     world.popups = world.popups.filter((pop) => pop.t < 0.7);
   }
 
+
+
+  function setLassoBtn(on) {
+    const b = document.getElementById("btn-lasso");
+    if (b) b.hidden = !on;
+  }
+
+  function banditSize() {
+    const img = banditImg;
+    const h = 108;
+    const w = img ? (img.width / img.height) * h : 80;
+    return { w, h };
+  }
+
+  function setupWest() {
+    world.platforms = [];
+    world.lassoHits = 0;
+    world.lassoCool = 0;
+    world.lassos = [];
+    world.capturing = false;
+    world.captureT = 0;
+    world.westWon = false;
+    world.goalDist = 0;
+    world.westDecor = [];
+    const fy = houseFloorTop();
+    for (const p of world.players) standOnFloor(p, fy);
+    placePlayers();
+    world.bandit = { x: clamp(W * 0.70, 230, 310), y: 0, vy: 0, onGround: true, flash: 0, hopT: 0, tied: false };
+    const { h } = banditSize();
+    world.bandit.y = fy - h * 0.48;
+    seedWestDecor();
+    setLassoBtn(true);
+  }
+
+  function seedWestDecor() {
+    const fy = houseFloorTop();
+    const items = [];
+    let x = 40;
+    const kinds = ["saloon", "cactusbg", "tower", "tumble", "saloon", "cactusbg", "tumble"];
+    for (let i = 0; i < 8; i++) {
+      const kind = kinds[i % kinds.length];
+      items.push({ kind, x: x + rand(-20, 30), y: fy, s: rand(0.85, 1.15), rot: rand(0, 6), z: kind === "tumble" ? 0.9 : 0.35 });
+      x += rand(180, 280);
+    }
+    world.westDecor = items;
+  }
+
+  function spawnWestWave() {
+    if (world.capturing || world.westWon) return;
+    const fy = houseFloorTop();
+    const roll = Math.random();
+    const kind = roll < 0.34 ? "barrel" : roll < 0.67 ? "cactus" : "hay";
+    const r = kind === "cactus" ? rand(30, 40) : kind === "barrel" ? rand(24, 32) : rand(22, 30);
+    world.obstacles.push({
+      x: W + 100, y: fy - r * 0.72, r, kind, rot: 0, passed: false,
+    });
+    const n = Math.random() < 0.75 ? (Math.random() < 0.45 ? 2 : 1) : 0;
+    for (let i = 0; i < n; i++) {
+      world.stars.push({
+        x: W + rand(120, 240) + i * 36,
+        y: fy - rand(46, 150),
+        r: 16, rot: rand(0, 6), coin: true,
+      });
+    }
+  }
+
+  function throwLasso() {
+    if (!isWestMode() || state !== "play" || world.capturing || world.westWon || world.levelDone) return;
+    if ((world.lassoCool || 0) > 0) return;
+    const p = world.players[0];
+    const b = world.bandit;
+    if (!p || p.ghost || !b) return;
+    world.lassoCool = 0.85;
+    const { drawW, drawH } = playerSize(p);
+    const hx = p.x + drawW * 0.22;
+    const hy = p.y + drawH * 0.02;
+    (world.lassos || (world.lassos = [])).push({
+      x: hx, y: hy, tx: b.x, ty: b.y + 8, t: 0, life: 0.55, spin: 0, hit: false,
+    });
+    sfxBoost();
+    for (let i = 0; i < 8; i++) {
+      world.particles.push({
+        x: hx + rand(-8, 8), y: hy + rand(-8, 8),
+        vx: rand(-40, 80), vy: rand(-80, 20),
+        t: 0, life: rand(0.25, 0.5), r: rand(3, 6),
+        kind: "sparkle", color: "#ffe9a0",
+      });
+    }
+  }
+
+  function lassoHitBandit() {
+    const b = world.bandit;
+    if (!b || b.tied) return;
+    world.lassoHits = (world.lassoHits || 0) + 1;
+    b.flash = 0.45;
+    updateHud();
+    const labels = ["Got him!", "Almost!", "Yeehaw!"];
+    const text = labels[Math.min(world.lassoHits, 3) - 1] + " " + world.lassoHits + "/3";
+    world.popups.push({ x: b.x, y: b.y - 30, t: 0, text, color: "#ffe566" });
+    addScore(world.players[0], 25, b.x, b.y);
+    sfxCollect();
+    burst(b.x, b.y);
+    if (world.lassoHits >= 3) startWestCapture();
+  }
+
+  function startWestCapture() {
+    world.capturing = true;
+    world.captureT = 0;
+    world.lassoHits = 3;
+    if (world.bandit) world.bandit.tied = true;
+    world.lassos = [];
+    world.speed = 0;
+    setLassoBtn(false);
+    elHint.hidden = true;
+    updateHud();
+  }
+
+  function finishWestWin() {
+    if (world.westWon || world.levelDone) return;
+    world.westWon = true;
+    world.capturing = true;
+    maybeCompleteLevel();
+  }
+
+  function updateWest(dt, sp) {
+    const fy = houseFloorTop();
+    if (world.lassoCool > 0) world.lassoCool -= dt;
+
+    // decor + tumbleweeds
+    for (const d of (world.westDecor || [])) {
+      d.x -= sp * (d.z || 0.4);
+      if (d.kind === "tumble") d.rot = (d.rot || 0) + dt * 6;
+      if (d.x < -220) {
+        d.x = W + rand(80, 260);
+        d.s = rand(0.85, 1.15);
+      }
+    }
+
+    // dust trail
+    const p = world.players[0];
+    if (p && p.onGround && !world.capturing && Math.random() < 0.55) {
+      const { drawH } = playerSize(p);
+      world.particles.push({
+        x: p.x - rand(8, 24), y: p.y + drawH * 0.4,
+        vx: rand(-80, -20), vy: rand(-30, 10),
+        t: 0, life: rand(0.25, 0.5), r: rand(4, 9),
+        kind: "poof", color: "rgba(210,170,90,0.7)",
+      });
+    }
+
+    const b = world.bandit;
+    if (b) {
+      const { h } = banditSize();
+      const land = fy - h * 0.48;
+      if (world.capturing) {
+        world.captureT = (world.captureT || 0) + dt;
+        // ease sheriff toward bandit, bandit holds still
+        if (p && !p.ghost) {
+          const target = b.x - 70;
+          p.x += (target - p.x) * Math.min(1, dt * 2.4);
+        }
+        b.y = land;
+        b.vy = 0;
+        if (world.captureT > 1.7) finishWestWin();
+      } else {
+        // keep ahead of the sheriff, bob a little
+        const targetX = clamp((p ? p.x : W * 0.32) + 150, W * 0.58, W * 0.78);
+        b.x += (targetX - b.x) * Math.min(1, dt * 3);
+        // auto-hop obstacles
+        b.hopT = (b.hopT || 0) - dt;
+        let needHop = false;
+        for (const o of world.obstacles) {
+          if (o.x - b.x < 70 && o.x - b.x > -10 && o.y + o.r > fy - 80) needHop = true;
+        }
+        if (needHop && b.onGround) {
+          b.vy = -620;
+          b.onGround = false;
+        }
+        b.vy += 1500 * dt;
+        b.y += b.vy * dt;
+        if (b.y >= land && b.vy >= 0) {
+          b.y = land;
+          b.vy = 0;
+          b.onGround = true;
+        } else {
+          b.onGround = false;
+        }
+        if (b.flash > 0) b.flash -= dt;
+        // auto lasso when close
+        if (p && !p.ghost && Math.abs(b.x - p.x) < 190 && (world.lassoCool || 0) <= 0) {
+          throwLasso();
+        }
+      }
+    }
+
+    for (const l of (world.lassos || [])) {
+      l.t += dt;
+      l.spin = (l.spin || 0) + dt * 14;
+      const u = Math.min(1, l.t / 0.42);
+      const ease = 1 - (1 - u) * (1 - u);
+      l.x = l.x + (l.tx - l.x) * Math.min(1, dt * 7);
+      l.y = l.y + (l.ty - l.y) * Math.min(1, dt * 7) - Math.sin(ease * Math.PI) * 16 * (1 - u);
+      if (!l.hit && b && Math.hypot(l.x - b.x, l.y - (b.y + 8)) < 48) {
+        l.hit = true;
+        l.t = l.life;
+        lassoHitBandit();
+      }
+    }
+    world.lassos = (world.lassos || []).filter((l) => l.t < l.life);
+  }
+
+  function drawWestScene() {
+    const fy = houseFloorTop();
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#7ec8ff");
+    g.addColorStop(0.22, "#ffe27a");
+    g.addColorStop(0.5, "#ffd36a");
+    g.addColorStop(0.7, "#f0c36a");
+    g.addColorStop(1, "#e8b45a");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+
+    // big sun + glare
+    const sunX = W - 64, sunY = 78;
+    const sunG = ctx.createRadialGradient(sunX, sunY, 6, sunX, sunY, 130);
+    sunG.addColorStop(0, "rgba(255,255,240,1)");
+    sunG.addColorStop(0.18, "rgba(255,230,80,0.95)");
+    sunG.addColorStop(0.45, "rgba(255,200,60,0.28)");
+    sunG.addColorStop(1, "rgba(255,220,120,0)");
+    ctx.fillStyle = sunG;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 130, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffe566";
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 38, 0, Math.PI * 2);
+    ctx.fill();
+    // glare streaks
+    ctx.save();
+    ctx.translate(sunX, sunY);
+    ctx.rotate(world.time * 0.15);
+    ctx.strokeStyle = "rgba(255,255,230,0.45)";
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 44, Math.sin(a) * 44);
+      ctx.lineTo(Math.cos(a) * 78, Math.sin(a) * 78);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // far dunes
+    const far = -((world.dist * 0.12) % (W + 260));
+    ctx.fillStyle = "#e8b86a";
+    for (let i = -1; i < 5; i++) {
+      const hx = far + i * (W * 0.55) + 40;
+      ctx.beginPath();
+      ctx.ellipse(hx, fy - 6, 170, 54, 0, Math.PI, 0, true);
+      ctx.fill();
+    }
+    const near = -((world.dist * 0.28) % (W + 200));
+    ctx.fillStyle = "#dca45a";
+    for (let i = -1; i < 5; i++) {
+      const hx = near + i * (W * 0.5) + 20;
+      ctx.beginPath();
+      ctx.ellipse(hx, fy + 8, 140, 44, 0, Math.PI, 0, true);
+      ctx.fill();
+    }
+
+    // wispy clouds
+    for (const c of world.clouds) {
+      const by = c.y * 0.35 + 30 + Math.sin(world.time * 0.6 + (c.bob || 0)) * 6;
+      drawPuff(c.x, by, 36 * c.s, "rgba(255,255,255,0.55)");
+    }
+
+    // town decor
+    for (const d of (world.westDecor || [])) drawWestDecor(d, fy);
+
+    // sandy floor
+    const sand = ctx.createLinearGradient(0, fy - 8, 0, H);
+    sand.addColorStop(0, "#f3d48a");
+    sand.addColorStop(0.15, "#e8c06a");
+    sand.addColorStop(1, "#d0a050");
+    ctx.fillStyle = sand;
+    ctx.fillRect(-20, fy, W + 40, H - fy + 40);
+    ctx.fillStyle = "rgba(255,255,230,0.35)";
+    ctx.fillRect(-20, fy, W + 40, 8);
+    ctx.save();
+    ctx.strokeStyle = "rgba(160,110,40,0.25)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([16, 18]);
+    ctx.lineDashOffset = -world.dist * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-20, fy + 22);
+    ctx.lineTo(W + 20, fy + 22);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawWestDecor(d, fy) {
+    const x = d.x, s = d.s || 1;
+    ctx.save();
+    if (d.kind === "saloon") {
+      const w = 120 * s, h = 88 * s;
+      const y = fy - h;
+      ctx.fillStyle = "#b8753a";
+      ctx.strokeStyle = "#4a2a10";
+      ctx.lineWidth = 3;
+      ctx.fillRect(x, y + 22, w, h - 22);
+      ctx.strokeRect(x, y + 22, w, h - 22);
+      // false front
+      ctx.fillStyle = "#c98444";
+      ctx.beginPath();
+      ctx.moveTo(x - 6, y + 24);
+      ctx.lineTo(x + w / 2, y);
+      ctx.lineTo(x + w + 6, y + 24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#ffe9a0";
+      ctx.fillRect(x + 16, y + 28, w - 32, 18);
+      ctx.fillStyle = "#5a3010";
+      ctx.font = "800 11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("SALOON", x + w / 2, y + 41);
+      ctx.fillStyle = "#6a3a18";
+      ctx.fillRect(x + w * 0.38, fy - 36, w * 0.24, 36);
+      ctx.fillStyle = "#7ec8ff";
+      ctx.fillRect(x + 12, y + 52, 22, 18);
+      ctx.fillRect(x + w - 34, y + 52, 22, 18);
+    } else if (d.kind === "tower") {
+      const y = fy - 130 * s;
+      ctx.fillStyle = "#8a8f96";
+      ctx.fillRect(x + 18, y + 36, 10, 94 * s);
+      ctx.fillRect(x + 42, y + 36, 10, 94 * s);
+      ctx.fillStyle = "#c5ccd4";
+      ctx.fillRect(x, y, 70 * s, 44 * s);
+      ctx.strokeStyle = "#3a4048";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, 70 * s, 44 * s);
+      ctx.fillStyle = "#7ec8ff";
+      ctx.beginPath();
+      ctx.arc(x + 22, y + 22, 8, 0, Math.PI * 2);
+      ctx.arc(x + 48 * s, y + 22, 8, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (d.kind === "cactusbg") {
+      drawCactus(x, fy, 26 * s, true);
+    } else if (d.kind === "tumble") {
+      ctx.translate(x, fy - 16);
+      ctx.rotate(d.rot || 0);
+      ctx.strokeStyle = "#c4a05a";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 14 * s, 0, Math.PI * 2);
+      ctx.stroke();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * 14 * s, Math.sin(a) * 14 * s);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawCactus(x, fy, r, bg) {
+    ctx.save();
+    ctx.fillStyle = bg ? "#5aaa4a" : "#3d9a40";
+    ctx.strokeStyle = "#1f5a22";
+    ctx.lineWidth = 3;
+    const h = r * 2.4;
+    // body
+    ctx.beginPath();
+    ctx.roundRect(x - r * 0.38, fy - h, r * 0.76, h, r * 0.38);
+    ctx.fill();
+    ctx.stroke();
+    // arms
+    ctx.beginPath();
+    ctx.roundRect(x - r * 1.05, fy - h * 0.62, r * 0.7, r * 0.38, r * 0.2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.roundRect(x - r * 1.05, fy - h * 0.85, r * 0.38, r * 0.5, r * 0.2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.roundRect(x + r * 0.35, fy - h * 0.5, r * 0.7, r * 0.38, r * 0.2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.roundRect(x + r * 0.67, fy - h * 0.72, r * 0.38, r * 0.46, r * 0.2);
+    ctx.fill();
+    ctx.stroke();
+    // friendly bloom
+    ctx.fillStyle = "#ff7ad9";
+    ctx.beginPath();
+    ctx.arc(x, fy - h - 4, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawWestObstacle(o) {
+    const fy = houseFloorTop();
+    ctx.save();
+    if (o.kind === "cactus") {
+      drawCactus(o.x, fy, o.r, false);
+    } else if (o.kind === "barrel") {
+      ctx.translate(o.x, o.y);
+      ctx.fillStyle = "#b56a2c";
+      ctx.strokeStyle = "#4a2a10";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, o.r * 0.95, o.r * 1.05, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = "#d9a05a";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-o.r * 0.85, -o.r * 0.3); ctx.lineTo(o.r * 0.85, -o.r * 0.3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-o.r * 0.85, o.r * 0.3); ctx.lineTo(o.r * 0.85, o.r * 0.3); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,230,0.28)";
+      ctx.beginPath();
+      ctx.ellipse(-o.r * 0.25, -o.r * 0.3, o.r * 0.28, o.r * 0.18, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (o.kind === "hay") {
+      ctx.translate(o.x, o.y);
+      ctx.fillStyle = "#e8c04a";
+      ctx.strokeStyle = "#8a6a18";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, o.r * 1.25, o.r * 0.85, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(140,100,20,0.45)";
+      ctx.lineWidth = 2;
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.ellipse(0, 0, o.r * (1.05 - Math.abs(i) * 0.08), o.r * (0.7 - Math.abs(i) * 0.08), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawBanditAndLasso() {
+    const b = world.bandit;
+    if (!b) return;
+    const { w, h } = banditSize();
+    const img = banditImg;
+    ctx.save();
+    if (b.flash > 0) ctx.filter = "brightness(1.5)";
+    const wob = b.tied ? 0 : Math.sin(world.time * 10) * 2;
+    if (img) ctx.drawImage(img, b.x - w * 0.5 + wob, b.y - h * 0.45, w, h);
+    ctx.filter = "none";
+    // capture rope around arms
+    if (b.tied) {
+      const cx = b.x, cy = b.y + h * 0.02;
+      ctx.strokeStyle = "#c48a3a";
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      const t = world.captureT || 0;
+      const loops = Math.min(3, 1 + Math.floor(t * 3));
+      for (let i = 0; i < loops; i++) {
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + i * 8, 28 + i * 2, 10, 0.15, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = "#ffe2a0";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.strokeStyle = "#c48a3a";
+        ctx.lineWidth = 5;
+      }
+      // shine
+      if (t > 0.4) {
+        ctx.fillStyle = "rgba(255,255,200,0.7)";
+        for (let i = 0; i < 5; i++) {
+          const a = world.time * 5 + i * 1.2;
+          ctx.beginPath();
+          ctx.arc(cx + Math.cos(a) * 34, cy + Math.sin(a) * 16, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
+
+    // flying lassos
+    for (const l of (world.lassos || [])) {
+      ctx.save();
+      ctx.translate(l.x, l.y);
+      ctx.rotate(l.spin || 0);
+      const rg = ctx.createRadialGradient(0, 0, 2, 0, 0, 28);
+      rg.addColorStop(0, "rgba(255,240,160,0.85)");
+      rg.addColorStop(0.5, "rgba(255,200,80,0.35)");
+      rg.addColorStop(1, "rgba(255,200,80,0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.arc(0, 0, 28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#c48a3a";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 22, 14, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = "#ffe9a0";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
 
   function setupChase() {
     world.platforms = [];
@@ -1938,6 +2477,8 @@
       drawHouseOutside();
     } else if (isParkourMode()) {
       drawParkourHouse();
+    } else if (isWestMode()) {
+      drawWestScene();
     } else if (isChaseMode()) {
       drawChaseScene();
     } else if (isGroundMode()) {
@@ -1985,15 +2526,18 @@
         for (const pl of world.platforms) drawParkourPlatform(pl);
         for (const lad of (world.ladders || [])) drawLadder(lad);
         drawParkourDoor();
+      } else if (isWestMode()) {
+        /* desert decor already in drawWestScene */
       } else if (isGroundMode()) {
         for (const pl of world.platforms) drawHousePlatform(pl);
       }
-      if (campaign === "adventure" && world.goalDist && !isParkourMode()) drawFinishLine();
+      if (campaign === "adventure" && world.goalDist && !isParkourMode() && !isWestMode()) drawFinishLine();
       for (const o of world.obstacles) drawObstacle(o);
       for (const st of world.stars) if (!st.got) drawStar(st);
       for (const part of world.particles) drawParticle(part);
       if (isSkyMode()) for (const tk of world.tickles) drawTickle(tk);
       if (isChaseMode() || isParkourMode()) drawChasers();
+      if (isWestMode()) drawBanditAndLasso();
       for (const plr of world.players) drawPlayer(plr);
       for (const pop of world.popups) {
         ctx.save();
@@ -2580,6 +3124,10 @@
       drawSpinner(o);
       return;
     }
+    if (o.kind === "barrel" || o.kind === "cactus" || o.kind === "hay") {
+      drawWestObstacle(o);
+      return;
+    }
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
@@ -2925,6 +3473,9 @@
   window.addEventListener("blur", () => { pointers.clear(); keysDown.clear(); syncBoosts(); });
 
   window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyL" || e.code === "KeyF") {
+      if (state === "play" && isWestMode()) { e.preventDefault(); if (!e.repeat) throwLasso(); }
+    }
     if (isP1Key(e.code) || isP2Key(e.code)) e.preventDefault();
     if (e.repeat) return;
     if (isP1Key(e.code) || isP2Key(e.code)) {
@@ -2970,6 +3521,7 @@
     if (wasHouse) showHousePlayers();
     else if (campaign === "chase") showChasePick();
     else if (campaign === "parkour") showParkourPick();
+    else if (campaign === "west") showWestPick();
     else showModeSelect();
     elOver.hidden = true;
     elHud.hidden = true;
@@ -2982,6 +3534,7 @@
     campaign = "classic";
     pickStep = "mode";
     chosen = { p1: null, p2: null };
+    setLassoBtn(false);
     elModes.hidden = false;
     elCards.hidden = true;
     elPrompt.hidden = true;
@@ -2991,6 +3544,8 @@
     if (chaseBtn) chaseBtn.hidden = false;
     const parkBtn = document.getElementById("modeParkour");
     if (parkBtn) parkBtn.hidden = false;
+    const westBtn = document.getElementById("modeWest");
+    if (westBtn) westBtn.hidden = false;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = false;
     const free = document.querySelector(".free-play-label");
@@ -3012,6 +3567,8 @@
     if (chaseBtn) chaseBtn.hidden = true;
     const parkBtn = document.getElementById("modeParkour");
     if (parkBtn) parkBtn.hidden = true;
+    const westBtn = document.getElementById("modeWest");
+    if (westBtn) westBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -3033,6 +3590,8 @@
     if (chaseBtn) chaseBtn.hidden = true;
     const parkBtn = document.getElementById("modeParkour");
     if (parkBtn) parkBtn.hidden = true;
+    const westBtn = document.getElementById("modeWest");
+    if (westBtn) westBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -3058,12 +3617,41 @@
     if (chaseBtn) chaseBtn.hidden = true;
     const parkBtn = document.getElementById("modeParkour");
     if (parkBtn) parkBtn.hidden = true;
+    const westBtn = document.getElementById("modeWest");
+    if (westBtn) westBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
     if (free) free.hidden = true;
     elTagline.textContent = "Parkour House — pick a buddy!";
     elPrompt.textContent = "Pick your buddy!";
+    elPrompt.className = "pick-prompt";
+    renderCards();
+    refreshCards();
+  }
+
+  function showWestPick() {
+    campaign = "west";
+    mode = 1;
+    pickStep = "p1";
+    chosen = { p1: null, p2: null };
+    elModes.hidden = true;
+    elCards.hidden = false;
+    elPrompt.hidden = false;
+    elBack.hidden = false;
+    document.getElementById("modeHouse").hidden = true;
+    const chaseBtn = document.getElementById("modeChase");
+    if (chaseBtn) chaseBtn.hidden = true;
+    const parkBtn = document.getElementById("modeParkour");
+    if (parkBtn) parkBtn.hidden = true;
+    const westBtn = document.getElementById("modeWest");
+    if (westBtn) westBtn.hidden = true;
+    const advBtn = document.getElementById("modeAdventure");
+    if (advBtn) advBtn.hidden = true;
+    const free = document.querySelector(".free-play-label");
+    if (free) free.hidden = true;
+    elTagline.textContent = "Wild West — pick a buddy!";
+    elPrompt.textContent = "Pick your sheriff!";
     elPrompt.className = "pick-prompt";
     renderCards();
     refreshCards();
@@ -3085,6 +3673,8 @@
       elTagline.textContent = "The Big Chase — pick a buddy!";
     } else if (campaign === "parkour") {
       elTagline.textContent = "Parkour House — pick a buddy!";
+    } else if (campaign === "west") {
+      elTagline.textContent = "Wild West — pick a buddy!";
     } else {
       elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
     }
@@ -3172,6 +3762,16 @@
     ensureAudio();
     showParkourPick();
   });
+  document.getElementById("modeWest").addEventListener("click", () => {
+    ensureAudio();
+    showWestPick();
+  });
+  document.getElementById("btn-lasso").addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    ensureAudio();
+    throwLasso();
+  });
   document.getElementById("modeAdventure").addEventListener("click", () => {
     ensureAudio();
     showAdventureMap();
@@ -3240,6 +3840,7 @@
 
 
   function hideAdventureOverlays() {
+    setLassoBtn(false);
     const mapUi = document.getElementById("map-ui");
     const end = document.getElementById("level-end");
     const vic = document.getElementById("victory");
@@ -3282,6 +3883,12 @@
 
   function maybeCompleteLevel() {
     if (world.levelDone) return;
+    if (isWestMode()) {
+      if (!world.westWon) return;
+      if (campaign === "adventure") levelComplete();
+      else chaseFreeWin();
+      return;
+    }
     if (!world.goalDist || world.dist < world.goalDist) return;
     if (campaign === "adventure") {
       if (world.bossMode) return;
@@ -3298,9 +3905,10 @@
     pointers.clear();
     elHint.hidden = true;
     elOver.hidden = false;
+    setLassoBtn(false);
     const s = world.players[0] ? world.players[0].score : 0;
     const best = setBest(s);
-    elOverTitle.textContent = isParkourMode() ? "You made it!" : "You got away!";
+    elOverTitle.textContent = isWestMode() ? "Yeehaw! Gotcha!" : (isParkourMode() ? "You made it!" : "You got away!");
     elOver1p.hidden = false;
     elOver2p.hidden = true;
     document.getElementById("over-score").textContent = String(s);
@@ -3334,7 +3942,7 @@
       const prev = advSave.stars[adventureLevel] || 0;
       advSave.stars[adventureLevel] = Math.max(prev, stars);
       if (advSave.unlockedThrough < adventureLevel + 2) {
-        advSave.unlockedThrough = Math.min(9, adventureLevel + 2);
+        advSave.unlockedThrough = Math.min(10, adventureLevel + 2);
       }
       const rewardId = UNLOCK_BY_LEVEL[adventureLevel];
       if (rewardId && advSave.chars.indexOf(rewardId) === -1) {
@@ -3458,17 +4066,18 @@
     ctx.fillStyle = "#3a7bdd";
     ctx.fillRect(hx - 6, hy + 18, 12, 18);
 
-    // winding path of 9 nodes
+    // winding path of 10 nodes
     const nodes = [
-      { x: 0.20, y: 0.90 },
-      { x: 0.70, y: 0.82 },
-      { x: 0.26, y: 0.72 },
-      { x: 0.74, y: 0.62 },
-      { x: 0.24, y: 0.52 },
-      { x: 0.70, y: 0.42 },
-      { x: 0.28, y: 0.32 },
-      { x: 0.68, y: 0.23 },
-      { x: 0.36, y: 0.14 },
+      { x: 0.20, y: 0.91 },
+      { x: 0.70, y: 0.83 },
+      { x: 0.26, y: 0.74 },
+      { x: 0.74, y: 0.65 },
+      { x: 0.24, y: 0.56 },
+      { x: 0.70, y: 0.47 },
+      { x: 0.28, y: 0.38 },
+      { x: 0.68, y: 0.29 },
+      { x: 0.30, y: 0.20 },
+      { x: 0.72, y: 0.11 },
     ];
     const pts = nodes.map((n) => ({ x: n.x * W, y: n.y * H }));
     ctx.lineWidth = 18;
@@ -3494,7 +4103,7 @@
       const pulse = (unlocked && i === advSave.unlockedThrough - 1) ? 1 + Math.sin(world.time * 4) * 0.08 : 1;
       const r = 28 * pulse;
       ctx.beginPath();
-      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 8 ? "#ffe566" : i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
+      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 9 ? "#ffc14d" : i === 8 ? "#ffe566" : i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
       ctx.strokeStyle = "#16324a";
       ctx.lineWidth = 4;
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -3610,7 +4219,7 @@
   function showVictory() {
     if (state === "victory") return;
     world.levelDone = true;
-    if (advSave.unlockedThrough < 9) advSave.unlockedThrough = 9;
+    if (advSave.unlockedThrough < 10) advSave.unlockedThrough = 10;
     writeAdv();
     state = "victory";
     world.players.forEach((p) => { p.boosting = false; });
@@ -3702,7 +4311,7 @@
 
   function seedAdvShot() {
     advSave.unlockedThrough = 5;
-    advSave.stars = [3, 2, 3, 1, 0, 0, 0, 0, 0];
+    advSave.stars = [3, 2, 3, 1, 0, 0, 0, 0, 0, 0];
     advSave.chars = START_CHARS.concat(["yellow", "elk", "cg", "cap"]);
   }
 
@@ -3717,16 +4326,18 @@
       );
       const houseChars = HOUSE_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
       const chaseChars = CHASE_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
+      const westChars = WEST_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
       const chasePs = [
         loadImage("assets/tickle_hand2.png").then((img) => { tickle2Img = img; }),
         loadImage("assets/spinner_guy.png").then((img) => { spinnerImg = img; }),
         loadImage("assets/skater.png").then((img) => { skaterImg = img; }),
+        loadImage("assets/bandit.png").then((img) => { banditImg = img; }),
       ];
       await Promise.all(CHARS.map(async (c) => {
         c.image = await loadImage(c.src);
         if (c.flame) c.flameImg = await loadImage(c.flame);
         if (c.thumb) c.thumbImg = await loadImage(c.thumb);
-      }).concat([tickleP]).concat(housePs).concat(houseChars).concat(chaseChars).concat(chasePs));
+      }).concat([tickleP]).concat(housePs).concat(houseChars).concat(chaseChars).concat(westChars).concat(chasePs));
     } catch (err) {
       elLoading.textContent = "Could not load pictures. Try refreshing.";
       console.error(err);
@@ -3821,6 +4432,18 @@
         startGame();
         if (world.players[0]) world.players[0].invuln = 0;
       },
+      startWest: (id) => {
+        campaign = "west";
+        mode = 1;
+        chosen.p1 = WEST_CHARS.find((x) => x.id === id) || WEST_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = true;
+        startGame();
+        if (world.players[0]) world.players[0].invuln = 0;
+      },
+      throwLasso: () => throwLasso(),
+      captureNow: () => { world.lassoHits = 3; startWestCapture(); },
+      getLassoHits: () => world.lassoHits || 0,
       startHouseYard: (id) => {
         campaign = "house";
         mode = 1;

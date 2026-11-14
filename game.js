@@ -567,8 +567,7 @@
     if (mode === 1) {
       let mid = p1 ? '<div class="pscore">' + p1.score + "</div>" : "";
       if (isWestMode() && p1) {
-        const hits = world.lassoHits || 0;
-        mid += '<div class="adv-progress" style="color:#fff;font-weight:800;text-align:right;text-shadow:0 2px 0 #16324a;margin-right:58px">Lasso ' + hits + "/3</div>";
+        /* bandit lives are drawn on the canvas */
       } else if ((campaign === "adventure" || isChaseMode() || isParkourMode()) && world.goalDist && p1) {
         const pct = Math.max(0, Math.min(100, (world.dist / world.goalDist) * 100));
         mid += '<div class="adv-progress"><div class="bar-bg"><div class="bar-fg" style="width:' + pct + '%"></div></div></div>';
@@ -1132,6 +1131,7 @@
   function setupWest() {
     world.platforms = [];
     world.lassoHits = 0;
+    world.banditLives = 10;
     world.lassoCool = 0;
     world.lassos = [];
     world.capturing = false;
@@ -1187,7 +1187,7 @@
     const p = world.players[0];
     const b = world.bandit;
     if (!p || p.ghost || !b) return;
-    world.lassoCool = 0.85;
+    world.lassoCool = 0.7;
     const { drawW, drawH } = playerSize(p);
     const hx = p.x + drawW * 0.22;
     const hy = p.y + drawH * 0.02;
@@ -1205,25 +1205,32 @@
     }
   }
 
+  function banditLivesLeft() {
+    if (world.banditLives == null) world.banditLives = 10;
+    return Math.max(0, world.banditLives);
+  }
+
   function lassoHitBandit() {
     const b = world.bandit;
     if (!b || b.tied) return;
-    world.lassoHits = (world.lassoHits || 0) + 1;
+    world.banditLives = banditLivesLeft() - 1;
+    world.lassoHits = 10 - world.banditLives;
     b.flash = 0.45;
     updateHud();
-    const labels = ["Got him!", "Almost!", "Yeehaw!"];
-    const text = labels[Math.min(world.lassoHits, 3) - 1] + " " + world.lassoHits + "/3";
+    const n = world.banditLives;
+    const text = n <= 0 ? "Yeehaw!" : ("Got him! " + n + " left");
     world.popups.push({ x: b.x, y: b.y - 30, t: 0, text, color: "#ffe566" });
     addScore(world.players[0], 25, b.x, b.y);
     sfxCollect();
     burst(b.x, b.y);
-    if (world.lassoHits >= 3) startWestCapture();
+    if (n <= 0) startWestCapture();
   }
 
   function startWestCapture() {
     world.capturing = true;
     world.captureT = 0;
-    world.lassoHits = 3;
+    world.banditLives = 0;
+    world.lassoHits = 10;
     if (world.bandit) world.bandit.tied = true;
     world.lassos = [];
     world.speed = 0;
@@ -1237,6 +1244,32 @@
     world.westWon = true;
     world.capturing = true;
     maybeCompleteLevel();
+  }
+
+  function drawBanditLives() {
+    if (!isWestMode()) return;
+    const n = banditLivesLeft();
+    const label = "Bandit: ❤️x" + n;
+    ctx.save();
+    ctx.font = "900 32px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const y = 92;
+    const x = W / 2;
+    const tw = ctx.measureText(label).width;
+    const bw = tw + 36, bh = 54;
+    ctx.fillStyle = "rgba(255, 245, 210, 0.94)";
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 4;
+    const left = x - bw / 2, top = y - bh / 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(left, top, bw, bh, 16);
+    else ctx.rect(left, top, bw, bh);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#16324a";
+    ctx.fillText(label, x, y + 1);
+    ctx.restore();
   }
 
   function updateWest(dt, sp) {
@@ -2539,6 +2572,7 @@
       if (isChaseMode() || isParkourMode()) drawChasers();
       if (isWestMode()) drawBanditAndLasso();
       for (const plr of world.players) drawPlayer(plr);
+      if (isWestMode()) drawBanditLives();
       for (const pop of world.popups) {
         ctx.save();
         ctx.globalAlpha = 1 - pop.t / 0.7;
@@ -4442,8 +4476,9 @@
         if (world.players[0]) world.players[0].invuln = 0;
       },
       throwLasso: () => throwLasso(),
-      captureNow: () => { world.lassoHits = 3; startWestCapture(); },
+      captureNow: () => { world.banditLives = 0; world.lassoHits = 10; startWestCapture(); },
       getLassoHits: () => world.lassoHits || 0,
+      getBanditLives: () => (world.banditLives == null ? 10 : world.banditLives),
       startHouseYard: (id) => {
         campaign = "house";
         mode = 1;

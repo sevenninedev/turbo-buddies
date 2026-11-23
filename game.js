@@ -45,6 +45,8 @@
   let smokePuffImg = null;
   let starburstImg = null;
   let runnerImg = null;
+  let gunImg = null;
+  let shotImg = null;
   let campaign = "classic"; // classic | house | adventure | chase | parkour | west | skybattle
   let skipNextIntro = false;
   let levelKind = "sky"; // sky | yard | house | boss | chase | parkour | west | skybattle
@@ -1193,7 +1195,7 @@
     for (const c of world.clouds) c.s = (c.s || 1) * 0.65;
     world.obstacles = [
       { kind: "smoke", x: W * 0.52, y: H * 0.26, r: 38, bob: 1.2, dead: false },
-      { kind: "runner", x: W * 0.58, y: H * 0.64, r: 32, bob: 2.1, dead: false },
+      { kind: "minion", x: W * 0.58, y: H * 0.64, r: 30, bob: 2.1, dead: false },
     ];
     world.stars = [
       { kind: "crate", x: W * 0.44, y: H * 0.48, r: 26, rot: 0.2, got: false, crate: true },
@@ -1202,7 +1204,7 @@
 
   function spawnSkyItem(kind, x, y) {
     if (kind === "smoke") world.obstacles.push({ kind: "smoke", x: x, y: y, r: 38, bob: rand(0, 8), dead: false });
-    else if (kind === "runner") world.obstacles.push({ kind: "runner", x: x, y: y, r: 32, bob: rand(0, 8), dead: false });
+    else if (kind === "minion") world.obstacles.push({ kind: "minion", x: x, y: y, r: 30, bob: rand(0, 8), dead: false });
     else world.stars.push({ kind: "crate", x: x, y: y, r: 26, rot: rand(0, 2), got: false, crate: true });
   }
 
@@ -1210,7 +1212,7 @@
     const y = rand(130, H - 170);
     const roll = Math.random();
     if (roll < 0.4) spawnSkyItem("smoke", W + 50, y);
-    else if (roll < 0.8) spawnSkyItem("runner", W + 50, y);
+    else if (roll < 0.8) spawnSkyItem("minion", W + 50, y);
     else spawnSkyItem("crate", W + 50, y);
   }
 
@@ -1285,7 +1287,7 @@
     if (re && !world.skyWon) { tx = re.x; ty = re.y; }
     let best = null, bestD = 1e9;
     for (const o of world.obstacles) {
-      if (o.dead || o.kind !== "runner") continue;
+      if (o.dead || o.kind !== "minion") continue;
       if (o.x < srcX - 8) continue;
       const d = Math.hypot(o.x - srcX, o.y - srcY);
       if (d < bestD) { bestD = d; best = o; }
@@ -1420,7 +1422,7 @@
     for (const z of (world.zaps || [])) {
       if (z.t > z.life || z.hit) continue;
       for (const o of world.obstacles) {
-        if (o.dead || o.kind !== "runner") continue;
+        if (o.dead || o.kind !== "minion") continue;
         if (Math.hypot(z.x - o.x, z.y - o.y) < o.r + 18) {
           o.dead = true;
           z.hit = true;
@@ -1644,11 +1646,11 @@
       const pw = fx.pad * sx, ph = fx.pad * sy;
       if (!opts.noShadow) {
         ctx.save();
-        ctx.globalAlpha = opts.shadowA == null ? 0.7 : opts.shadowA;
+        ctx.globalAlpha = opts.shadowA == null ? 0.45 : opts.shadowA;
         ctx.drawImage(fx.shadow, -w / 2 - pw, -h / 2 - ph + 6, fx.cw * sx, fx.shadow.height * sy);
         ctx.restore();
       }
-      ctx.drawImage(fx.outline, -w / 2 - pw, -h / 2 - ph, fx.cw * sx, fx.ch * sy);
+      if (!opts.noOutline) ctx.drawImage(fx.outline, -w / 2 - pw, -h / 2 - ph, fx.cw * sx, fx.ch * sy);
       ctx.drawImage(img, -w / 2, -h / 2, w, h);
       ctx.save();
       ctx.globalAlpha = opts.shine == null ? 1 : opts.shine;
@@ -1677,7 +1679,25 @@
       const rr = Math.max(sz.w, sz.h) * 0.42;
       drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr, 3.4, AI_SPARKLE_COLS[(i + 2) % AI_SPARKLE_COLS.length]);
     }
-    drawOnlineSprite(sz.img, sz.w, sz.h);
+    drawOnlineSprite(sz.img, sz.w, sz.h, { noOutline: true, shine: 0.4 });
+    drawHeldGun(sz.w, sz.h, true);
+    ctx.restore();
+  }
+
+  function drawHeldGun(drawW, drawH, fromHelper) {
+    if (!gunImg || !isSkyBattleMode()) return;
+    const gh = fromHelper ? 34 : 42;
+    const gw = (gunImg.width / gunImg.height) * gh;
+    let ang = 0.08;
+    const re = world.redEye;
+    if (re && !world.skyWon) {
+      const sy = fromHelper && world.helper ? world.helper.y : (world.players[0] ? world.players[0].y : re.y);
+      ang = Math.max(-0.35, Math.min(0.4, Math.atan2(re.y - sy, 180)));
+    }
+    ctx.save();
+    ctx.translate(drawW * 0.28, drawH * 0.1);
+    ctx.rotate(ang);
+    ctx.drawImage(gunImg, 0, -gh * 0.55, gw, gh);
     ctx.restore();
   }
 
@@ -1696,29 +1716,36 @@
       ctx.beginPath();
       ctx.arc(10, 0, 28, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = hot ? "rgba(80,230,255,0.35)" : "rgba(255,80,220,0.35)";
-      ctx.lineWidth = 16;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(-28, 0);
-      ctx.lineTo(30, 0);
-      ctx.stroke();
-      ctx.strokeStyle = hot ? "rgba(80,230,255,0.9)" : "rgba(255,90,220,0.9)";
-      ctx.lineWidth = 8;
-      ctx.beginPath();
-      ctx.moveTo(-24, 0);
-      ctx.lineTo(28, 0);
-      ctx.stroke();
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 3.2;
-      ctx.beginPath();
-      ctx.moveTo(-10, 0);
-      ctx.lineTo(28, 0);
-      ctx.stroke();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(28, 0, 6.5, 0, Math.PI * 2);
-      ctx.fill();
+      if (shotImg) {
+        const sh = 38;
+        const sw = (shotImg.width / shotImg.height) * sh;
+        ctx.rotate(-Math.PI / 2);
+        ctx.drawImage(shotImg, -sw / 2, -sh / 2, sw, sh);
+      } else {
+        ctx.strokeStyle = hot ? "rgba(80,230,255,0.35)" : "rgba(255,80,220,0.35)";
+        ctx.lineWidth = 16;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-28, 0);
+        ctx.lineTo(30, 0);
+        ctx.stroke();
+        ctx.strokeStyle = hot ? "rgba(80,230,255,0.9)" : "rgba(255,90,220,0.9)";
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(-24, 0);
+        ctx.lineTo(28, 0);
+        ctx.stroke();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3.2;
+        ctx.beginPath();
+        ctx.moveTo(-10, 0);
+        ctx.lineTo(28, 0);
+        ctx.stroke();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(28, 0, 6.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
   }
@@ -1773,7 +1800,7 @@
       const rr = Math.max(w, h) * (0.46 + Math.sin(world.time * 4 + i) * 0.06);
       drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr * 0.85, 3.8, AI_SPARKLE_COLS[i % AI_SPARKLE_COLS.length]);
     }
-    drawOnlineSprite(redEyeImg, w, h);
+    drawOnlineSprite(redEyeImg, w, h, { noOutline: true, shine: 0.4 });
     if (blink) {
       // blink-like gleam over the eye area — overlay only
       ctx.globalAlpha = 0.55;
@@ -1825,7 +1852,7 @@
     ctx.translate(x, y + bob);
     ctx.rotate(rot);
     ctx.scale(1 / Math.sqrt(squash), squash);
-    drawOnlineSprite(img, w, h);
+    drawOnlineSprite(img, w, h, { noOutline: true, shine: 0.35 });
     ctx.restore();
   }
 
@@ -3762,7 +3789,10 @@
       ctx.drawImage(ch.flameImg, -drawW / 2, -drawH / 2, drawW, drawH);
       ctx.restore();
     }
-    if (isSkyBattleMode()) drawOnlineSprite(ch.image, drawW, drawH, { shine: ch.id === "flame" ? 0.85 + Math.sin(world.time * 18) * 0.15 : 1 });
+    if (isSkyBattleMode()) {
+      drawOnlineSprite(ch.image, drawW, drawH, { noOutline: true, shine: ch.id === "flame" ? 0.4 + Math.sin(world.time * 18) * 0.12 : 0.4 });
+      drawHeldGun(drawW, drawH, false);
+    }
     else ctx.drawImage(ch.image, -drawW / 2, -drawH / 2, drawW, drawH);
     if (ch.id === "money" && !p.ghost) {
       const tw = drawW * 0.34, th = drawH * 0.16;
@@ -3893,8 +3923,8 @@
       drawSkySprite(smokePuffImg, o.x, o.y, 84, o.bob || 0);
       return;
     }
-    if (o.kind === "runner") {
-      drawSkySprite(runnerImg, o.x, o.y, 78, o.bob || 0);
+    if (o.kind === "minion") {
+      drawSkySprite(redEyeImg, o.x, o.y, 64, o.bob || 0);
       return;
     }
     ctx.save();
@@ -4025,7 +4055,7 @@
         const squash = 1 + Math.sin(world.time * 6 + s.x) * 0.08;
         ctx.rotate(s.rot * 0.15 + Math.sin(world.time * 3) * 0.08);
         ctx.scale(1 / Math.sqrt(squash), squash);
-        drawOnlineSprite(starburstImg, w, h);
+        drawOnlineSprite(starburstImg, w, h, { noOutline: true, shine: 0.45 });
       }
       drawTwinkle(s.r * 0.75, -s.r * 0.85, 6 + shine * 3, "#fffce0");
       drawTwinkle(-s.r * 0.7, s.r * 0.2, 4 + shine * 2, "#7af0ff");
@@ -5204,7 +5234,8 @@
         loadImage("assets/red_eye_guy.png").then((img) => { redEyeImg = img; }),
         loadImage("assets/smoke_puff.png").then((img) => { smokePuffImg = img; }),
         loadImage("assets/starburst_box.png").then((img) => { starburstImg = img; }),
-        loadImage("assets/runner_footprints.png").then((img) => { runnerImg = img; }),
+        loadImage("assets/sky_gun.png").then((img) => { gunImg = img; }),
+        loadImage("assets/sky_shot.png").then((img) => { shotImg = img; }),
       ];
       await Promise.all(CHARS.map(async (c) => {
         c.image = await loadImage(c.src);

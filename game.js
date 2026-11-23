@@ -1563,23 +1563,121 @@
     }
   }
 
+
+  const _spriteFx = new Map();
+
+  function makeSpriteFx(img) {
+    if (!img || !img.width) return null;
+    const key = img.src || img;
+    if (_spriteFx.has(key)) return _spriteFx.get(key);
+    const iw = img.width, ih = img.height;
+    const pad = 30;
+    const cw = iw + pad * 2, ch = ih + pad * 2;
+
+    function c2d(w, h) {
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      return [c, c.getContext("2d")];
+    }
+
+    const [silC, sil] = c2d(cw, ch);
+    sil.drawImage(img, pad, pad);
+    sil.globalCompositeOperation = "source-in";
+    sil.fillStyle = "#ffffff";
+    sil.fillRect(0, 0, cw, ch);
+
+    const rad = Math.max(5, Math.round(Math.min(iw, ih) * 0.03) + 4);
+    const [outC, oc] = c2d(cw, ch);
+    for (let a = 0; a < 20; a++) {
+      const ang = (a / 20) * Math.PI * 2;
+      oc.drawImage(silC, Math.cos(ang) * rad, Math.sin(ang) * rad);
+    }
+    oc.globalCompositeOperation = "source-in";
+    oc.fillStyle = "#16324a";
+    oc.fillRect(0, 0, cw, ch);
+    oc.globalCompositeOperation = "destination-out";
+    oc.drawImage(silC, 0, 0);
+    // thin inner white ring
+    const [innC, ic] = c2d(cw, ch);
+    const rad2 = Math.max(2, rad - 3);
+    for (let a = 0; a < 16; a++) {
+      const ang = (a / 16) * Math.PI * 2;
+      ic.drawImage(silC, Math.cos(ang) * rad2, Math.sin(ang) * rad2);
+    }
+    ic.globalCompositeOperation = "source-in";
+    ic.fillStyle = "#ffffff";
+    ic.fillRect(0, 0, cw, ch);
+    ic.globalCompositeOperation = "destination-out";
+    ic.drawImage(silC, 0, 0);
+    oc.globalCompositeOperation = "source-over";
+    oc.drawImage(innC, 0, 0);
+
+    const [shC, sh] = c2d(cw, ch + 16);
+    sh.filter = "blur(9px)";
+    sh.drawImage(silC, 5, 12);
+    sh.filter = "none";
+    sh.globalCompositeOperation = "source-in";
+    sh.fillStyle = "rgba(20, 40, 70, 0.5)";
+    sh.fillRect(0, 0, shC.width, shC.height);
+
+    const [hiC, hi] = c2d(cw, ch);
+    hi.drawImage(silC, 0, 0);
+    hi.globalCompositeOperation = "source-in";
+    const g = hi.createLinearGradient(pad, pad, cw * 0.55, ch * 0.5);
+    g.addColorStop(0, "rgba(255,255,255,0.48)");
+    g.addColorStop(0.28, "rgba(255,255,255,0.12)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    hi.fillStyle = g;
+    hi.fillRect(0, 0, cw, ch);
+
+    const fx = { outline: outC, shadow: shC, shine: hiC, pad: pad, cw: cw, ch: ch, iw: iw, ih: ih };
+    _spriteFx.set(key, fx);
+    return fx;
+  }
+
+  function drawOnlineSprite(img, w, h, opts) {
+    if (!img) return;
+    opts = opts || {};
+    const fx = makeSpriteFx(img);
+    if (fx) {
+      const sx = w / fx.iw, sy = h / fx.ih;
+      const pw = fx.pad * sx, ph = fx.pad * sy;
+      if (!opts.noShadow) {
+        ctx.save();
+        ctx.globalAlpha = opts.shadowA == null ? 0.7 : opts.shadowA;
+        ctx.drawImage(fx.shadow, -w / 2 - pw, -h / 2 - ph + 6, fx.cw * sx, fx.shadow.height * sy);
+        ctx.restore();
+      }
+      ctx.drawImage(fx.outline, -w / 2 - pw, -h / 2 - ph, fx.cw * sx, fx.ch * sy);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.save();
+      ctx.globalAlpha = opts.shine == null ? 1 : opts.shine;
+      ctx.drawImage(fx.shine, -w / 2 - pw, -h / 2 - ph, fx.cw * sx, fx.ch * sy);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    }
+  }
+
   function drawSkyHelper() {
     const hlp = world.helper;
     if (!hlp) return;
     const sz = helperSize();
     if (!sz.img) return;
-    const bob = Math.sin(world.time * 4.4) * 5;
+    const breath = 1 + Math.sin(world.time * 2.7) * 0.05;
+    const bob = Math.sin(world.time * 5.1) * 7;
     const hx = hlp.x, hy = hlp.y + bob;
     ctx.save();
     drawAura(hx, hy, Math.max(sz.w, sz.h) * 0.95, sz.useBlaster ? "80,220,255" : "255,150,40", 0.6);
     ctx.translate(hx, hy);
-    ctx.rotate(Math.sin(world.time * 3.2) * 0.06);
+    ctx.rotate(Math.sin(world.time * 3.4) * 0.09);
+    ctx.scale(1 / Math.sqrt(breath), breath);
     for (let i = 0; i < 3; i++) {
       const a = world.time * 3.4 + i * 2.1;
       const rr = Math.max(sz.w, sz.h) * 0.42;
       drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr, 3.4, AI_SPARKLE_COLS[(i + 2) % AI_SPARKLE_COLS.length]);
     }
-    ctx.drawImage(sz.img, -sz.w / 2, -sz.h / 2, sz.w, sz.h);
+    drawOnlineSprite(sz.img, sz.w, sz.h);
     ctx.restore();
   }
 
@@ -1658,20 +1756,35 @@
     const re = world.redEye;
     if (!re || !redEyeImg || world.skyWon) return;
     const { w, h } = redEyeSize();
-    const squash = 1 + Math.sin(world.time * 3.15) * 0.1;
-    const rot = Math.sin(world.time * 2.5) * 0.14 + (re.hurt > 0 ? Math.sin(world.time * 22) * 0.1 : 0);
+    const breath = 1 + Math.sin(world.time * 2.4) * 0.06;
+    const squash = (1 + Math.sin(world.time * 3.15) * 0.12) * breath;
+    const rot = Math.sin(world.time * 2.5) * 0.16 + (re.hurt > 0 ? Math.sin(world.time * 22) * 0.1 : 0);
+    const cycle = world.time % 2.8;
+    const blink = cycle > 2.52 && cycle < 2.7;
     ctx.save();
     drawAura(re.x, re.y, Math.max(w, h) * 0.95, re.hurt > 0 ? "255,120,200" : "255,220,110", 0.62);
-    ctx.translate(re.x, re.y);
+    ctx.translate(re.x, re.y + Math.sin(world.time * 2.1) * 3);
     ctx.rotate(rot);
-    ctx.scale(1 / Math.sqrt(squash), squash);
+    if (blink) ctx.scale(1.12 / Math.sqrt(squash), squash * 0.68);
+    else ctx.scale(1 / Math.sqrt(squash), squash);
     if (re.flash > 0) ctx.globalAlpha = 0.55 + Math.sin(world.time * 40) * 0.35;
     for (let i = 0; i < 4; i++) {
       const a = world.time * 2.6 + i * 1.6;
       const rr = Math.max(w, h) * (0.46 + Math.sin(world.time * 4 + i) * 0.06);
       drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr * 0.85, 3.8, AI_SPARKLE_COLS[i % AI_SPARKLE_COLS.length]);
     }
-    ctx.drawImage(redEyeImg, -w / 2, -h / 2, w, h);
+    drawOnlineSprite(redEyeImg, w, h);
+    if (blink) {
+      // blink-like gleam over the eye area — overlay only
+      ctx.globalAlpha = 0.55;
+      const gleam = ctx.createRadialGradient(0, -h * 0.12, 2, 0, -h * 0.12, w * 0.28);
+      gleam.addColorStop(0, "rgba(255,255,255,0.85)");
+      gleam.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = gleam;
+      ctx.beginPath();
+      ctx.ellipse(0, -h * 0.12, w * 0.28, h * 0.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -1704,10 +1817,15 @@
   function drawSkySprite(img, x, y, h, wob) {
     if (!img) return;
     const w = (img.width / img.height) * h;
-    const bob = Math.sin(world.time * 3.4 + (wob || 0)) * 4;
+    const seed = wob || 0;
+    const bob = Math.sin(world.time * 4.2 + seed) * 6;
+    const squash = 1 + Math.sin(world.time * 7.2 + seed) * 0.08;
+    const rot = Math.sin(world.time * 3.6 + seed) * 0.1;
     ctx.save();
     ctx.translate(x, y + bob);
-    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    ctx.rotate(rot);
+    ctx.scale(1 / Math.sqrt(squash), squash);
+    drawOnlineSprite(img, w, h);
     ctx.restore();
   }
 
@@ -3591,11 +3709,16 @@
     if (!ch || !ch.image) return;
     const { drawW, drawH } = playerSize(p);
     const giggle = p.giggle > 0 ? Math.sin(world.time * 42) * 5 : 0;
-    const bob = Math.sin(world.time * 4.2 + p.slot) * 4 + giggle;
-    const stretch = p.boosting ? (ch.zippy ? 1.18 : 1.13) : (p.vy > 80 ? 0.93 : 1);
+    const sky = isSkyBattleMode();
+    const breath = sky ? 1 + Math.sin(world.time * 2.8 + p.slot) * 0.05 : 1;
+    const bob = Math.sin(world.time * (sky ? 5.2 : 4.2) + p.slot) * (sky ? 6 : 4) + giggle;
+    let stretch = p.boosting ? (ch.zippy ? 1.18 : (sky ? 1.2 : 1.13)) : (p.vy > 80 ? (sky ? 0.88 : 0.93) : 1);
+    stretch *= breath;
+    if (sky && ch.id === "flame") stretch *= 1 + Math.sin(world.time * 18) * 0.04;
     const sx = 1 / Math.sqrt(stretch);
     const sy = stretch;
-    const rot = clamp(p.vy * -0.00045, -0.2, 0.2) + Math.sin(world.time * 6.5 + p.slot) * 0.035
+    const rot = clamp(p.vy * (sky ? -0.00075 : -0.00045), sky ? -0.3 : -0.2, sky ? 0.3 : 0.2)
+      + Math.sin(world.time * (sky ? 5.6 : 6.5) + p.slot) * (sky ? 0.055 : 0.035)
       + (p.giggle > 0 ? Math.sin(world.time * 36) * 0.14 : 0);
 
     ctx.save();
@@ -3639,7 +3762,8 @@
       ctx.drawImage(ch.flameImg, -drawW / 2, -drawH / 2, drawW, drawH);
       ctx.restore();
     }
-    ctx.drawImage(ch.image, -drawW / 2, -drawH / 2, drawW, drawH);
+    if (isSkyBattleMode()) drawOnlineSprite(ch.image, drawW, drawH, { shine: ch.id === "flame" ? 0.85 + Math.sin(world.time * 18) * 0.15 : 1 });
+    else ctx.drawImage(ch.image, -drawW / 2, -drawH / 2, drawW, drawH);
     if (ch.id === "money" && !p.ghost) {
       const tw = drawW * 0.34, th = drawH * 0.16;
       const pulse = 0.55 + Math.sin(world.time * 8) * 0.45;
@@ -3898,8 +4022,10 @@
       if (starburstImg) {
         const h = s.r * 2.6;
         const w = (starburstImg.width / starburstImg.height) * h;
-        ctx.rotate(s.rot * 0.15);
-        ctx.drawImage(starburstImg, -w / 2, -h / 2, w, h);
+        const squash = 1 + Math.sin(world.time * 6 + s.x) * 0.08;
+        ctx.rotate(s.rot * 0.15 + Math.sin(world.time * 3) * 0.08);
+        ctx.scale(1 / Math.sqrt(squash), squash);
+        drawOnlineSprite(starburstImg, w, h);
       }
       drawTwinkle(s.r * 0.75, -s.r * 0.85, 6 + shine * 3, "#fffce0");
       drawTwinkle(-s.r * 0.7, s.r * 0.2, 4 + shine * 2, "#7af0ff");

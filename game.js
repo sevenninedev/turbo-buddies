@@ -254,6 +254,10 @@
     beep(200, 0.16, "triangle", 0.1, 0, 90);
     beep(700, 0.18, "sine", 0.07, 0.05, 1400);
   }
+  function sfxWhoosh() {
+    beep(360, 0.16, "sine", 0.07, 0, 920);
+    beep(720, 0.2, "triangle", 0.06, 0.05, 1500);
+  }
   function sfxOver() {
     beep(392, 0.18, "square", 0.08, 0);
     beep(311, 0.18, "square", 0.08, 0.16);
@@ -443,7 +447,10 @@
     }
     updateHud();
     hideAdventureOverlays();
-    if (isYardMode() && !skipNextIntro) {
+    if (isPartyMode() && !skipNextIntro) {
+      state = "partyout";
+      setupPartyOutside();
+    } else if (isYardMode() && !skipNextIntro) {
       state = "yard";
       setupYard();
       elHud.hidden = true;
@@ -646,6 +653,16 @@
       p.lives = 0;
       p.boosting = false;
       sfxGhost();
+      if (isPartyMode()) {
+        if (!world.partyRetrying) {
+          world.partyRetrying = true;
+          world.partyRetryT = 0.95;
+          elHint.textContent = "Oops! Try again!";
+          elHint.hidden = false;
+          world.hintT = 1.2;
+        }
+        return;
+      }
       if (livingPlayers().length === 0) gameOver();
     }
   }
@@ -819,6 +836,14 @@
       updateYard(dt);
       return;
     }
+    if (state === "partyout") {
+      updatePartyOutside(dt);
+      return;
+    }
+    if (state === "partywalk") {
+      updatePartyEnter(dt);
+      return;
+    }
     if (state === "intro") {
       updateIntro(dt);
       return;
@@ -985,6 +1010,7 @@
 
   function tryJump(p) {
     if (!p || p.ghost) return false;
+    if (isPartyMode() && ((world.landPoseT || 0) > 0 || (world.stompWinT || 0) > 0 || world.partyPhase === "drop")) return false;
     if (!(p.jumpBuf > 0) || (!(p.coyote > 0) && !p.climbing)) return false;
     p.climbing = false;
     p.vy = isPartyMode() ? ((world.partyPhase === "vent") ? -500 : -700) : (isChaseMode() ? -680 : ((isParkourMode() || isWestMode()) ? -700 : -720));
@@ -1186,8 +1212,314 @@
   }
 
   function partyFloor() {
-    return world.partyPhase === "vent" || world.partyPhase === "drop" ? H * 0.70 : H * 0.78;
+    return world.partyPhase === "vent" ? H * 0.70 : H * 0.78;
   }
+
+  function partyMansionRect() {
+    const gy = houseGroundY();
+    const hw = Math.min(W * 0.98, 400);
+    const hh = H * 0.60;
+    const hx = (W - hw) / 2;
+    return { x: hx - 6, y: gy - hh, w: hw + 12, h: hh + 18 };
+  }
+
+  function tapHitsPartyHouse(px, py) {
+    const r = partyMansionRect();
+    return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+  }
+
+  function setupPartyOutside() {
+    setPartyPad(false);
+    setZapBtn(false);
+    closeSuitcase();
+    world.doorOpen = 0;
+    world.introT = 0;
+    world.fade = 0;
+    world.partyPhase = "outside";
+    world.partyRetrying = false;
+    world.players.forEach((p) => {
+      const { drawH } = playerSize(p);
+      p.x = W * 0.22;
+      p.y = H * 0.88 - drawH * 0.38;
+      p.vy = 0;
+      p.facing = 1;
+      p.lives = 1;
+      p.ghost = false;
+      p.boosting = false;
+      p.onGround = true;
+      p.landPose = 0;
+    });
+    elHud.hidden = true;
+    elHint.hidden = false;
+    elHint.textContent = "TAP THE HOUSE!";
+    world.hintT = 99;
+  }
+
+  function startPartyEnter() {
+    if (state !== "partyout") return;
+    sfxStart();
+    const gy = houseGroundY();
+    world.players.forEach((p) => {
+      const { drawH } = playerSize(p);
+      p._walkFromX = p.x;
+      p._walkFromY = p.y;
+      p._walkToX = W * 0.5;
+      p._walkToY = gy - drawH * 0.22;
+      p.vy = 0;
+      p.facing = 1;
+    });
+    state = "partywalk";
+    world.introT = 0;
+    world.doorOpen = 0;
+    world.fade = 0;
+    elHint.textContent = "GOING IN!";
+    elHint.hidden = false;
+  }
+
+  function updatePartyOutside(dt) {
+    for (const p of world.players) {
+      p.vy = 0;
+      p.boosting = false;
+    }
+  }
+
+  function updatePartyEnter(dt) {
+    world.introT += dt;
+    const t = world.introT;
+    world.doorOpen = clamp(t / 0.35, 0, 1);
+    const walk = clamp((t - 0.08) / 1.15, 0, 1);
+    const u = walk * walk * (3 - 2 * walk);
+    for (const p of world.players) {
+      if (p._walkFromX != null) p.x = p._walkFromX + (p._walkToX - p._walkFromX) * u;
+      if (p._walkFromY != null) p.y = p._walkFromY + (p._walkToY - p._walkFromY) * u;
+      p.vy = 0;
+      p.boosting = false;
+    }
+    if (t > 1.28) world.fade = clamp((t - 1.28) / 0.26, 0, 1);
+    if (t > 1.58) beginPlay();
+  }
+
+  function drawTapMansionHint() {
+    const bounce = Math.sin(world.time * 4.2) * 10;
+    const r = partyMansionRect();
+    const x = W / 2;
+    const y = Math.max(78, r.y - 22) + bounce;
+    ctx.save();
+    ctx.translate(x, y);
+    const label = "Tap the house!";
+    ctx.font = "800 32px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const tw = Math.min(W - 28, Math.max(240, ctx.measureText(label).width + 44));
+    const th = 56;
+    ctx.fillStyle = "rgba(255, 230, 80, 0.96)";
+    ctx.strokeStyle = "#3a2100";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-tw / 2, -th / 2, tw, th, 18);
+    else ctx.rect(-tw / 2, -th / 2, tw, th);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#3a2100";
+    ctx.fillText(label, 0, 1);
+    ctx.fillStyle = "#ffb347";
+    ctx.strokeStyle = "#3a2100";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-18, th / 2 + 6);
+    ctx.lineTo(18, th / 2 + 6);
+    ctx.lineTo(0, th / 2 + 28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPartyOutside() {
+    const gy = houseGroundY();
+    const sky = ctx.createLinearGradient(0, 0, 0, gy);
+    sky.addColorStop(0, "#6ec4ff");
+    sky.addColorStop(0.5, "#b8e8ff");
+    sky.addColorStop(1, "#fff4c8");
+    ctx.fillStyle = sky;
+    ctx.fillRect(-20, -20, W + 40, gy + 20);
+    ctx.fillStyle = "rgba(255, 220, 80, 0.4)";
+    ctx.beginPath(); ctx.arc(W - 54, 54, 46, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath(); ctx.arc(W - 54, 54, 28, 0, Math.PI * 2); ctx.fill();
+    function puff(x, y, sc) {
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.beginPath();
+      ctx.arc(x, y, 16 * sc, 0, Math.PI * 2);
+      ctx.arc(x + 18 * sc, y - 8 * sc, 20 * sc, 0, Math.PI * 2);
+      ctx.arc(x + 36 * sc, y, 16 * sc, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    puff(28, 80, 1.1);
+    puff(W * 0.34, 50, 0.85);
+    puff(W * 0.12, 140, 0.7);
+    const grass = ctx.createLinearGradient(0, gy, 0, H);
+    grass.addColorStop(0, "#8ae05a");
+    grass.addColorStop(0.5, "#4fb83a");
+    grass.addColorStop(1, "#2f8a28");
+    ctx.fillStyle = grass;
+    ctx.fillRect(-20, gy, W + 40, H - gy + 20);
+    ctx.fillStyle = "#9eec68";
+    for (let i = 0; i < 22; i++) {
+      const gx = (i / 21) * W + Math.sin(i * 2.1) * 6;
+      ctx.beginPath();
+      ctx.moveTo(gx, gy + 2);
+      ctx.lineTo(gx - 4, gy - 12);
+      ctx.lineTo(gx + 3, gy + 2);
+      ctx.lineTo(gx + 8, gy - 14);
+      ctx.lineTo(gx + 4, gy + 2);
+      ctx.fill();
+    }
+    for (let i = 0; i < 8; i++) {
+      const fx = 16 + i * (W - 32) / 7 + Math.sin(i * 1.7) * 8;
+      const fy = gy + 20 + (i % 2) * 16;
+      ctx.fillStyle = ["#ff6b9a", "#ffd24a", "#ff8a4a", "#c86bff"][i % 4];
+      ctx.beginPath(); ctx.arc(fx, fy, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffe566";
+      ctx.beginPath(); ctx.arc(fx, fy, 1.8, 0, Math.PI * 2); ctx.fill();
+    }
+    const r = partyMansionRect();
+    const hx = r.x + 8, hw = r.w - 16, base = gy, peak = r.y + 8;
+    const eaves = peak + (base - peak) * 0.28;
+    // path
+    ctx.beginPath();
+    ctx.moveTo(W * 0.12, H + 8);
+    ctx.lineTo(W * 0.88, H + 8);
+    ctx.lineTo(W * 0.5 + 36, gy + 2);
+    ctx.lineTo(W * 0.5 - 36, gy + 2);
+    ctx.closePath();
+    const pg = ctx.createLinearGradient(0, gy, 0, H);
+    pg.addColorStop(0, "#f0d18a");
+    pg.addColorStop(1, "#d2a05a");
+    ctx.fillStyle = pg; ctx.fill();
+    ctx.strokeStyle = "#b07a30"; ctx.lineWidth = 3; ctx.stroke();
+    // chimneys
+    ctx.fillStyle = "#e07060";
+    ctx.fillRect(hx + hw * 0.12, peak + 18, 22, 46);
+    ctx.fillRect(hx + hw * 0.82, peak + 22, 22, 46);
+    ctx.fillStyle = "#d45848";
+    ctx.fillRect(hx + hw * 0.10, peak + 14, 28, 10);
+    ctx.fillRect(hx + hw * 0.80, peak + 18, 28, 10);
+    // roof wings + center
+    ctx.beginPath();
+    ctx.moveTo(hx - 16, eaves + 10);
+    ctx.lineTo(hx + hw * 0.28, peak);
+    ctx.lineTo(hx + hw * 0.5, eaves - 8);
+    ctx.lineTo(hx + hw * 0.72, peak);
+    ctx.lineTo(hx + hw + 16, eaves + 10);
+    ctx.closePath();
+    ctx.fillStyle = "#ff4d5a";
+    ctx.fill();
+    ctx.strokeStyle = "#9a1c1c";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    // walls
+    ctx.fillStyle = "#fff0a8";
+    ctx.fillRect(hx, eaves, hw, base - eaves);
+    ctx.strokeStyle = "#d0a430";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(hx, eaves, hw, base - eaves);
+    // floors
+    const stories = 3;
+    const sh = (base - eaves) / stories;
+    for (let s = 0; s < stories; s++) {
+      const sy = eaves + s * sh;
+      if (s) {
+        ctx.fillStyle = "#f0c850";
+        ctx.fillRect(hx, sy - 4, hw, 8);
+      }
+      const cols = 5;
+      const ww = 36, hh = sh * 0.52;
+      const gap = (hw - 40 - cols * ww) / (cols + 1);
+      for (let c = 0; c < cols; c++) {
+        const wx = hx + 20 + gap + c * (ww + gap);
+        const wy = sy + sh * 0.22;
+        const pulse = 0.55 + 0.45 * Math.sin(world.time * 3 + s + c);
+        const glow = ["#7af0ff", "#ff7ad9", "#ffe566", "#7ed957", "#c9a0ff"][(s + c) % 5];
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(wx - 3, wy - 3, ww + 6, hh + 6);
+        ctx.fillStyle = glow;
+        ctx.globalAlpha = 0.45 + pulse * 0.5;
+        ctx.fillRect(wx, wy, ww, hh);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#6a4a18";
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(wx, wy, ww, hh);
+        ctx.beginPath();
+        ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + hh);
+        ctx.moveTo(wx, wy + hh / 2); ctx.lineTo(wx + ww, wy + hh / 2);
+        ctx.stroke();
+      }
+    }
+    // PARTY banner
+    ctx.save();
+    ctx.translate(W / 2, eaves + 22);
+    ctx.rotate(Math.sin(world.time * 2) * 0.03);
+    ctx.fillStyle = "#ff7ad9";
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-78, -18, 156, 36, 10);
+    else ctx.rect(-78, -18, 156, 36);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = "900 22px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("PARTY!", 0, 1);
+    ctx.restore();
+    // balloons
+    const bals = [[hx + 18, eaves + 8, "#ff7ad9"], [hx + 40, eaves - 6, "#7af0ff"], [hx + hw - 22, eaves + 4, "#ffe566"], [hx + hw - 48, eaves - 10, "#7ed957"]];
+    for (const [bx, by, col] of bals) {
+      ctx.strokeStyle = "#16324a";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(bx, by + 16); ctx.lineTo(bx, by + 44); ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.ellipse(bx, by, 11, 15, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.stroke();
+    }
+    // big door
+    const dw = 70, dh = 96;
+    const dx = W / 2 - dw / 2, dy = base - dh;
+    const open = world.doorOpen || 0;
+    ctx.fillStyle = "#6a3a18";
+    ctx.fillRect(dx - 6, dy - 8, dw + 12, dh + 8);
+    ctx.fillStyle = "#8a4a22";
+    // left leaf slides
+    ctx.fillRect(dx, dy, dw * (1 - open * 0.85) * 0.5, dh);
+    ctx.fillRect(dx + dw - dw * (1 - open * 0.85) * 0.5, dy, dw * (1 - open * 0.85) * 0.5, dh);
+    if (open > 0.15) {
+      ctx.fillStyle = "#16324a";
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(dx + dw * 0.2, dy + 8, dw * 0.6, dh - 8);
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = "#3a2100";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(dx, dy, dw, dh);
+    // side vent tease
+    ctx.fillStyle = "#9eb4c8";
+    ctx.fillRect(hx + 14, base - 36, 52, 22);
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(hx + 14, base - 36, 52, 22);
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(hx + 20 + i * 12, base - 34);
+      ctx.lineTo(hx + 20 + i * 12, base - 16);
+      ctx.stroke();
+    }
+    if (world.fade > 0) {
+      ctx.fillStyle = "rgba(255,250,230," + world.fade + ")";
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+    }
+  }
+
 
   function setupParty() {
     world.partyPhase = "vent";
@@ -1225,6 +1557,12 @@
       { x: 1320, y: fy - 36, r: 30, spin: 2.4, rate: 7.5 },
       { x: 1680, y: fy - 36, r: 30, spin: 0.6, rate: 8.5 },
     ];
+    world.landPoseT = 0;
+    world.bossSquish = 0;
+    world.stompWinT = 0;
+    world.partyRetrying = false;
+    world.partyRetryT = 0;
+    world.partyCrowd = [];
     const p = world.players[0];
     if (p) {
       p.x = 150;
@@ -1232,74 +1570,187 @@
       p.vy = 0;
       p.facing = 1;
       p.onGround = true;
+      p.lives = 1;
+      p.ghost = false;
+      p.landPose = 0;
+      p.invuln = 0.8;
     }
     setZapBtn(true);
     setPartyPad(true);
     elHint.textContent = "CRAWL THROUGH THE VENT!";
     elHint.hidden = false;
     world.hintT = 3.2;
+    updateHud();
   }
 
   function startPartyPhase(phase) {
     world.partyPhase = phase;
-    if (phase === "party") {
+    if (phase === "party" || phase === "drop") {
       spawnPartyRoom();
       const p = world.players[0];
-      const fy = partyFloor();
       if (p) {
         p.x = 220;
-        p.y = 80;
-        p.vy = 80;
+        p.y = 36;
+        p.vy = 260;
         p.onGround = false;
-        p.invuln = 1.1;
+        p.invuln = 1.2;
+        p.landPose = 0;
       }
+      world.partyPhase = "drop";
+      world.dropT = 0;
+      world.landPoseT = 0;
       world.camX = 0;
-      elHint.textContent = "FIND THE BAD GUYS!";
+      elHint.textContent = "SUPER LANDING!";
       elHint.hidden = false;
-      world.hintT = 3.2;
+      world.hintT = 1.6;
+      sfxWhoosh();
+    } else if (phase === "land") {
+      spawnPartyRoom();
+      startLandPose();
     } else if (phase === "boss") {
       const p = world.players[0];
       const fy = partyFloor();
-      const bx = Math.max((p ? p.x : 200) + 150, (world.camX || 0) + W * 0.62);
-      world.partyBoss = { x: bx, y: fy - 90, vy: -200, flash: 0, hurt: 0, bob: 0 };
+      const bx = Math.max((p ? p.x : 200) + 160, (world.camX || 0) + W * 0.58);
+      world.partyBoss = {
+        x: bx, y: fy - 220, vx: 80, vy: 0,
+        homeX: bx, flyT: 0, flash: 0, hurt: 0, bob: 0, squish: 0,
+      };
       world.partyBossLives = 10;
-      elHint.textContent = "ZAP THE BIG VILLAIN!";
+      world.bossSquish = 0;
+      world.stompWinT = 0;
+      elHint.textContent = "ZAP HIM, THEN JUMP ON HIS FACE!";
       elHint.hidden = false;
-      world.hintT = 3.2;
+      world.hintT = 3.6;
       world.popups.push({ x: (p ? p.x : 200) + 40, y: 200, t: 0, text: "The big villain!", color: "#ff7ad9" });
-      burst(bx, fy - 90);
+      burst(bx, fy - 200);
       sfxStart();
     }
   }
 
+  function startLandPose() {
+    const p = world.players[0];
+    const fy = partyFloor();
+    const { drawH } = p ? playerSize(p) : { drawH: 90 };
+    if (p) {
+      if (p.x == null || p.x < 80) p.x = 220;
+      p.y = fy - drawH * 0.42;
+      p.vy = 0;
+      p.onGround = true;
+      p.invuln = 1.1;
+      p.landPose = 1.05;
+    }
+    world.partyPhase = "party";
+    world.landPoseT = 1.05;
+    world.dropT = 0;
+    world.popups.push({ x: (p ? p.x : 220), y: (p ? p.y : 200) - 70, t: 0, text: "WHOOSH!", color: "#7af0ff" });
+    landSparkles(p ? p.x : 220, fy - 20);
+    sfxWhoosh();
+    elHint.textContent = "FIND THE BAD GUYS!";
+    elHint.hidden = false;
+    world.hintT = 3.0;
+  }
+
+  function landSparkles(x, y) {
+    for (let i = 0; i < 18; i++) {
+      const a = (Math.PI * 2 * i) / 18;
+      world.particles.push({
+        x: x, y: y,
+        vx: Math.cos(a) * rand(40, 180),
+        vy: Math.sin(a) * rand(40, 180) - 40,
+        t: 0, life: 0.55,
+        r: rand(3, 6),
+        color: ["#ffe566", "#7af0ff", "#ff7ad9", "#ffffff"][i % 4],
+        kind: "sparkle",
+      });
+    }
+  }
+
+  function startStompFinale() {
+    if (world.partyWon || world.bossSquish > 0) return;
+    const boss = world.partyBoss;
+    const p = world.players[0];
+    if (!boss || !p) return;
+    world.bossSquish = 1.05;
+    world.stompWinT = 1.05;
+    boss.squish = 1.05;
+    boss.vy = 0;
+    boss.vx = 0;
+    world.partyBossLives = 0;
+    p.vy = 0;
+    p.invuln = 4;
+    p.y = Math.min(p.y, boss.y - 10);
+    world.shake = 14;
+    burst(boss.x, boss.y);
+    coinBurst(boss.x, boss.y);
+    landSparkles(boss.x, boss.y);
+    for (let i = 0; i < 8; i++) {
+      world.popups.push({
+        x: boss.x + rand(-50, 50),
+        y: boss.y - 40 + rand(-20, 20),
+        t: -i * 0.04,
+        text: i % 2 ? "★" : "☆",
+        color: "#ffe566",
+      });
+    }
+    world.popups.push({ x: boss.x, y: boss.y - 80, t: 0, text: "SQUISH!", color: "#ff7ad9" });
+    elHint.textContent = "SQUISH!";
+    elHint.hidden = false;
+    world.hintT = 1.2;
+    sfxWhoosh();
+    sfxCollect();
+  }
+
   function spawnPartyRoom() {
     const fy = H * 0.78;
+    const cols = ["#ff7ad9", "#7ed957", "#7af0ff", "#ffe566", "#ff9a2a", "#c9a0ff", "#ff6b8a", "#ffa0d0"];
+    world.partyCrowd = [];
+    for (let i = 0; i < 168; i++) {
+      const layer = i % 3;
+      const col = Math.floor(i / 3);
+      world.partyCrowd.push({
+        x: 70 + col * 34 + rand(-8, 8) + layer * 6,
+        y: fy - 16 - layer * 20,
+        col: cols[i % cols.length],
+        bob: rand(0, 8),
+        s: 0.40 + layer * 0.13,
+        layer,
+      });
+    }
     world.partyDancers = [];
-    const cols = ["#ff7ad9", "#7ed957", "#7af0ff", "#ffe566", "#ff9a2a", "#c9a0ff", "#ff6b8a"];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 24; i++) {
       world.partyDancers.push({
-        x: 260 + i * 170 + rand(-24, 24),
+        x: 200 + i * 108 + rand(-22, 22),
         y: fy - 36,
         col: cols[i % cols.length],
         bob: rand(0, 8),
         face: rand(0, 1) > 0.5 ? 1 : -1,
-        w: 28 + rand(0, 8),
+        w: 26 + rand(0, 8),
       });
     }
     world.partyBads = [];
     const spots = [420, 760, 1040, 1320, 1600, 1880, 2160, 2440];
+    const sizes = [
+      { sz: "s", h: 48, r: 22 },
+      { sz: "m", h: 70, r: 32 },
+      { sz: "l", h: 98, r: 46 },
+    ];
     for (let i = 0; i < 8; i++) {
+      const sz = sizes[i % 3];
       world.partyBads.push({
         x: spots[i] + rand(-40, 40),
-        y: fy - 40,
+        y: fy - sz.h * 0.38,
         bob: rand(0, 6),
-        vx: rand(0, 1) > 0.5 ? 40 : -40,
+        vx: (rand(0, 1) > 0.5 ? 1 : -1) * (28 + (sz.sz === "s" ? 18 : sz.sz === "m" ? 8 : 0)),
         dead: false,
-        r: 30,
+        r: sz.r,
+        h: sz.h,
+        sz: sz.sz,
+        hp: 3,
+        flash: 0,
       });
     }
     world.partyNotes = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 16; i++) {
       world.partyNotes.push({
         x: rand(200, 2600),
         y: rand(90, 280),
@@ -1390,7 +1841,7 @@
     if (world.partyWon || world.levelDone) return;
     world.partyWon = true;
     world.partyPhase = "won";
-    const b = world.partyBoss;
+    const b = world.squareBoss || world.partyBoss;
     if (b) {
       burst(b.x, b.y);
       coinBurst(b.x, b.y);
@@ -1400,10 +1851,393 @@
     maybeCompleteLevel();
   }
 
+  function startPartyEscape() {
+    if (world.partyWon || world.partyPhase === "escape") return;
+    world.partyPhase = "escape";
+    world.bossSquish = 0;
+    world.stompWinT = 0;
+    world.landPoseT = 0;
+    const fy = H * 0.78;
+    const p = world.players[0];
+    if (p) {
+      p.x = 200;
+      p.y = fy - 50;
+      p.vy = 0;
+      p.onGround = true;
+      p.facing = 1;
+      p.invuln = 1.3;
+      p.ghost = false;
+      p.landPose = 0;
+    }
+    if (!world.partyWeapon) world.partyWeapon = "blaster";
+    world.camX = 0;
+    world.escapeGoal = 3000;
+    world.escapeLen = 3480;
+    world.escapeSquares = [];
+    world.escapeTrailT = 0.15;
+    world.escapeBossHits = 0;
+    world.squareBoss = { x: 40, y: fy - 170, flash: 0, hurt: 0 };
+    world.zaps = world.zaps || [];
+    setZapBtn(true);
+    setPartyPad(true);
+    elHint.textContent = "ESCAPE! JUMP AND ZAP!";
+    elHint.hidden = false;
+    world.hintT = 3.2;
+    world.popups.push({ x: 220, y: 200, t: 0, text: "Burst out!", color: "#ffe566" });
+    sfxWhoosh();
+    sfxStart();
+  }
+
+  function updatePartyEscape(dt) {
+    const p = world.players[0];
+    if (!p || world.partyWon) return;
+    const fy = H * 0.78;
+    if (world.caseOpen) {
+      if (world.hintT > 0) { world.hintT -= dt; if (world.hintT <= 0) elHint.hidden = true; }
+      return;
+    }
+    let dir = 0;
+    if (world.holdLeft) dir -= 1;
+    if (world.holdRight) dir += 1;
+    if (keysDown.has("ArrowLeft") || keysDown.has("KeyA")) dir -= 1;
+    if (keysDown.has("ArrowRight") || keysDown.has("KeyD")) dir += 1;
+    dir = clamp(dir, -1, 1);
+    p.facing = dir || 1;
+
+    const GRAVITY = 1600;
+    p.x += (250 + dir * 90) * dt;
+    p.vy += GRAVITY * dt;
+    p.y += p.vy * dt;
+    p.coyote = p.onGround ? 0.1 : Math.max(0, (p.coyote || 0) - dt);
+    p.jumpBuf = Math.max(0, (p.jumpBuf || 0) - dt);
+    if (p.invuln > 0) p.invuln -= dt;
+    if (p.jumpBuf > 0) tryJump(p);
+
+    const { drawW, drawH } = playerSize(p);
+    const feet = p.y + drawH * 0.42;
+    if (feet >= fy) {
+      p.y = fy - drawH * 0.42;
+      p.vy = 0;
+      p.onGround = true;
+    } else p.onGround = false;
+    p.x = clamp(p.x, 80, world.escapeLen - 40);
+
+    world.camX += (clamp(p.x - W * 0.32, 0, world.escapeLen - W) - (world.camX || 0)) * Math.min(1, dt * 6);
+    if (world.zapCool > 0) world.zapCool -= dt;
+    if (world.hintT > 0) {
+      world.hintT -= dt;
+      if (world.hintT <= 0) elHint.hidden = true;
+    }
+    if (world.shake > 0) world.shake = Math.max(0, world.shake - 28 * dt);
+
+    const boss = world.squareBoss;
+    if (boss) {
+      const tx = p.x - 150;
+      const ty = fy - 150 + Math.sin(world.time * 3.1) * 48;
+      boss.x += (tx - boss.x) * Math.min(1, dt * 2.4);
+      boss.y += (ty - boss.y) * Math.min(1, dt * 2.2);
+      if (boss.flash > 0) boss.flash -= dt;
+      if (boss.hurt > 0) boss.hurt -= dt;
+      if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - boss.x, p.y - boss.y) < 60) hitPlayer(p);
+    }
+
+    world.escapeTrailT = (world.escapeTrailT || 0) - dt;
+    if (boss && world.escapeTrailT <= 0 && p.x < world.escapeGoal - 240) {
+      world.escapeTrailT = 0.38;
+      world.escapeSquares.push({
+        x: boss.x + 8,
+        y: boss.y + 24,
+        vy: 40,
+        pop: 0.2,
+        alive: true,
+        r: 15 + rand(0, 6),
+        flash: 0,
+        hop: rand(0, 3),
+      });
+    }
+    for (const sq of world.escapeSquares) {
+      if (!sq.alive) continue;
+      if (sq.flash > 0) sq.flash -= dt;
+      if (sq.pop > 0) {
+        sq.pop -= dt;
+        sq.y += 120 * dt;
+      } else {
+        sq.vy += 1500 * dt;
+        sq.y += sq.vy * dt;
+        if (sq.y >= fy - sq.r) {
+          sq.y = fy - sq.r;
+          sq.vy = -260 - Math.sin(world.time * 6 + sq.hop) * 40;
+        }
+        sq.x -= 28 * dt;
+        if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - sq.x, p.y - sq.y) < sq.r + 20) hitPlayer(p);
+      }
+    }
+
+    for (const z of (world.zaps || [])) {
+      z.x += z.vx * dt;
+      z.y += z.vy * dt;
+      z.t += dt;
+      if (z.hit) continue;
+      for (const sq of world.escapeSquares) {
+        if (!sq.alive || sq.pop > 0) continue;
+        if (Math.hypot(z.x - sq.x, z.y - sq.y) < sq.r + (z.kind === "net" ? 20 : 12)) {
+          sq.alive = false;
+          z.hit = true;
+          addScore(p, 15, sq.x, sq.y);
+          burst(sq.x, sq.y);
+          spawnZapFlash(sq.x, sq.y, false);
+          sfxCollect();
+          break;
+        }
+      }
+      if (!z.hit && boss && Math.hypot(z.x - boss.x, z.y - boss.y) < (z.kind === "net" ? 70 : 58)) {
+        z.hit = true;
+        world.escapeBossHits = (world.escapeBossHits || 0) + 1;
+        boss.flash = 0.25;
+        boss.hurt = 0.3;
+        boss.x -= 70;
+        addScore(p, 25, boss.x, boss.y);
+        spawnZapFlash(boss.x, boss.y, false);
+        world.shake = 7;
+        beep(300, 0.08, "square", 0.07);
+      }
+    }
+    world.zaps = (world.zaps || []).filter((z) => z.t < z.life && !z.hit);
+    world.escapeSquares = (world.escapeSquares || []).filter((sq) => sq.alive && sq.x > world.camX - 80);
+
+    for (const part of world.particles) {
+      part.x += part.vx * dt;
+      part.y += part.vy * dt;
+      part.t += dt;
+    }
+    world.particles = (world.particles || []).filter((pt) => pt.t < pt.life);
+    for (const pop of world.popups) pop.t += dt;
+    world.popups = (world.popups || []).filter((pop) => pop.t < 0.7);
+
+    if (!p.ghost && p.x >= world.escapeGoal - 20) {
+      world.popups.push({ x: p.x, y: p.y - 70, t: 0, text: "Got away!", color: "#7ed957" });
+      finishPartyWin();
+    }
+    if (world.time && Math.floor(world.time * 4) !== Math.floor((world.time - dt) * 4)) updateHud();
+  }
+
+  function drawPartyEscape() {
+    const cam = world.camX || 0;
+    const fy = H * 0.78;
+    const sky = ctx.createLinearGradient(0, 0, 0, fy);
+    sky.addColorStop(0, "#6ec4ff");
+    sky.addColorStop(0.55, "#b8e8ff");
+    sky.addColorStop(1, "#fff4c8");
+    ctx.fillStyle = sky;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    ctx.fillStyle = "rgba(255, 220, 80, 0.4)";
+    ctx.beginPath(); ctx.arc(W - 54, 58, 46, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath(); ctx.arc(W - 54, 58, 28, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.translate(-cam, 0);
+    // hills
+    ctx.fillStyle = "#8ee05a";
+    ctx.beginPath();
+    ctx.moveTo(-40, fy);
+    for (let x = -40; x < world.escapeLen + 80; x += 80) {
+      ctx.quadraticCurveTo(x + 40, fy - 40 - Math.sin(x * 0.01) * 18, x + 80, fy);
+    }
+    ctx.lineTo(world.escapeLen + 80, H + 20);
+    ctx.lineTo(-40, H + 20);
+    ctx.fill();
+    const grass = ctx.createLinearGradient(0, fy, 0, H);
+    grass.addColorStop(0, "#7ad14a");
+    grass.addColorStop(1, "#2f8a28");
+    ctx.fillStyle = grass;
+    ctx.fillRect(-40, fy, world.escapeLen + 120, H - fy + 20);
+    // start mansion peek
+    ctx.fillStyle = "#fff0a8";
+    ctx.fillRect(-30, fy - 160, 140, 160);
+    ctx.fillStyle = "#ff4d5a";
+    ctx.beginPath();
+    ctx.moveTo(-40, fy - 150);
+    ctx.lineTo(40, fy - 220);
+    ctx.lineTo(120, fy - 150);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#7af0ff";
+    ctx.fillRect(10, fy - 120, 28, 28);
+    ctx.fillRect(55, fy - 120, 28, 28);
+    ctx.fillStyle = "#8a4a22";
+    ctx.fillRect(40, fy - 70, 32, 70);
+    // trees
+    for (let x = 260; x < world.escapeLen; x += 220) {
+      ctx.fillStyle = "#c9894a";
+      ctx.fillRect(x - 6, fy - 50, 12, 50);
+      ctx.fillStyle = "#4fb83a";
+      ctx.beginPath();
+      ctx.arc(x, fy - 70, 28, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // getaway helicopter
+    drawGetawayCopter(world.escapeGoal, fy - 70);
+    // trail squares / minis
+    for (const sq of world.escapeSquares || []) {
+      if (!sq.alive) continue;
+      const popping = sq.pop > 0;
+      const sc = popping ? (1 - sq.pop / 0.2) * 0.6 + 0.2 : 1;
+      ctx.save();
+      ctx.translate(sq.x, sq.y);
+      ctx.scale(sc, sc);
+      if (sq.flash > 0) ctx.globalAlpha = 0.55 + Math.sin(world.time * 40) * 0.35;
+      ctx.fillStyle = "#1a1a1a";
+      ctx.strokeStyle = "#16324a";
+      ctx.lineWidth = 3;
+      const rr = sq.r;
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-rr, -rr, rr * 2, rr * 2, 5); ctx.fill(); ctx.stroke(); }
+      else { ctx.fillRect(-rr, -rr, rr * 2, rr * 2); ctx.strokeRect(-rr, -rr, rr * 2, rr * 2); }
+      if (!popping) {
+        // silly eyes
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.arc(-5, -3, 4, 0, Math.PI * 2); ctx.arc(5, -3, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#16324a";
+        ctx.beginPath(); ctx.arc(-5, -3, 1.8, 0, Math.PI * 2); ctx.arc(5, -3, 1.8, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+    // square boss
+    const boss = world.squareBoss;
+    if (boss) {
+      ctx.save();
+      ctx.translate(boss.x, boss.y);
+      ctx.rotate(Math.sin(world.time * 4) * 0.12 + (boss.hurt > 0 ? Math.sin(world.time * 20) * 0.08 : 0));
+      if (boss.flash > 0) ctx.globalAlpha = 0.55 + Math.sin(world.time * 40) * 0.35;
+      drawAura(0, 0, 90, "255,200,80", 0.45);
+      if (starburstImg) {
+        const h = 170;
+        const w = (starburstImg.width / starburstImg.height) * h;
+        drawOnlineSprite(starburstImg, w, h, { noOutline: true, shine: 0.4 });
+      } else {
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(-36, -36, 72, 72);
+      }
+      ctx.restore();
+    }
+    for (const part of world.particles || []) drawParticle(part);
+    for (const plr of world.players) drawPlayer(plr);
+    drawPartyZaps();
+    for (const pop of world.popups || []) {
+      ctx.save();
+      ctx.globalAlpha = 1 - pop.t / 0.7;
+      ctx.font = "800 26px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = pop.color || "#16324a";
+      ctx.lineWidth = 5;
+      ctx.strokeText(pop.text, pop.x, pop.y);
+      ctx.fillText(pop.text, pop.x, pop.y);
+      ctx.restore();
+    }
+    ctx.restore();
+    const left = Math.max(0, Math.ceil((world.escapeGoal - (world.players[0] ? world.players[0].x : 0)) / 40));
+    drawPartyBanner(W / 2, 92, "Getaway: " + left + "m");
+    drawPartyBanner(W / 2, 148, "Square: ⚡x" + (world.escapeBossHits || 0), 0.92);
+  }
+
+  function drawGetawayCopter(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    const spin = world.time * 18;
+    // rotor
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(spin) * 70, -36 + Math.sin(spin) * 6);
+    ctx.lineTo(Math.cos(spin + Math.PI) * 70, -36 + Math.sin(spin + Math.PI) * 6);
+    ctx.stroke();
+    ctx.strokeStyle = "#7af0ff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(spin + 0.5) * 66, -36);
+    ctx.lineTo(Math.cos(spin + 0.5 + Math.PI) * 66, -36);
+    ctx.stroke();
+    // mast
+    ctx.fillStyle = "#16324a";
+    ctx.fillRect(-3, -40, 6, 16);
+    // body
+    ctx.fillStyle = "#ffe566";
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-48, -28, 100, 44, 16);
+    else ctx.rect(-48, -28, 100, 44);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#7af0ff";
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-28, -18, 36, 22, 8);
+    else ctx.rect(-28, -18, 36, 22);
+    ctx.fill(); ctx.stroke();
+    // tail
+    ctx.fillStyle = "#ff7ad9";
+    ctx.beginPath();
+    ctx.moveTo(48, -8);
+    ctx.lineTo(92, -18);
+    ctx.lineTo(92, 8);
+    ctx.lineTo(48, 10);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // skids
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-36, 22); ctx.lineTo(-36, 34); ctx.lineTo(40, 34); ctx.lineTo(36, 22);
+    ctx.stroke();
+    ctx.fillStyle = "#16324a";
+    ctx.font = "900 11px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("GO!", 8, 4);
+    ctx.restore();
+  }
+
   function updateParty(dt) {
+    if (world.partyRetryT > 0) {
+      world.partyRetryT -= dt;
+      if (world.hintT > 0) { world.hintT -= dt; }
+      if (world.partyRetryT <= 0) {
+        skipNextIntro = true;
+        startGame();
+      }
+      return;
+    }
+    if (world.stompWinT > 0) {
+      world.stompWinT -= dt;
+      if (world.partyBoss) {
+        world.partyBoss.squish = world.stompWinT;
+        world.partyBoss.flash = 0.2;
+      }
+      if (world.hintT > 0) { world.hintT -= dt; }
+      for (const part of world.particles) {
+        part.x += part.vx * dt;
+        part.y += part.vy * dt;
+        part.t += dt;
+      }
+      world.particles = (world.particles || []).filter((pt) => pt.t < pt.life);
+      for (const pop of world.popups) pop.t += dt;
+      world.popups = (world.popups || []).filter((pop) => pop.t < 0.85);
+      if (world.stompWinT <= 0) startPartyEscape();
+      return;
+    }
     if (world.partyWon) return;
+    if (world.partyPhase === "escape") {
+      updatePartyEscape(dt);
+      return;
+    }
     const p = world.players[0];
     if (!p) return;
+    if (world.landPoseT > 0) {
+      world.landPoseT -= dt;
+      p.landPose = world.landPoseT;
+      p.vy = 0;
+      p.onGround = true;
+      if (world.landPoseT <= 0) p.landPose = 0;
+    }
     if (world.partyBossIn > 0) {
       world.partyBossIn -= dt;
       if (world.partyBossIn <= 0 && world.partyPhase === "party") startPartyPhase("boss");
@@ -1416,25 +2250,30 @@
     const GRAVITY = 1600;
     const fy = partyFloor();
     const inVent = world.partyPhase === "vent";
+    const posing = (world.landPoseT || 0) > 0;
     const ceilY = inVent ? H * 0.34 : 40;
 
     let dir = 0;
-    if (world.holdLeft) dir -= 1;
-    if (world.holdRight) dir += 1;
-    if (keysDown.has("ArrowLeft") || keysDown.has("KeyA")) dir -= 1;
-    if (keysDown.has("ArrowRight") || keysDown.has("KeyD")) dir += 1;
-    dir = clamp(dir, -1, 1);
-    if (dir) p.facing = dir;
+    if (!posing && world.partyPhase !== "drop") {
+      if (world.holdLeft) dir -= 1;
+      if (world.holdRight) dir += 1;
+      if (keysDown.has("ArrowLeft") || keysDown.has("KeyA")) dir -= 1;
+      if (keysDown.has("ArrowRight") || keysDown.has("KeyD")) dir += 1;
+      dir = clamp(dir, -1, 1);
+      if (dir) p.facing = dir;
+    }
 
     const spd = inVent ? 190 : 240;
-    if (world.partyPhase !== "drop") p.x += dir * spd * dt;
+    if (world.partyPhase !== "drop" && !posing) p.x += dir * spd * dt;
 
-    p.vy += GRAVITY * dt;
-    p.y += p.vy * dt;
+    if (!posing) {
+      p.vy += GRAVITY * dt;
+      p.y += p.vy * dt;
+    }
     p.coyote = p.onGround ? 0.1 : Math.max(0, (p.coyote || 0) - dt);
     p.jumpBuf = Math.max(0, (p.jumpBuf || 0) - dt);
     if (p.invuln > 0) p.invuln -= dt;
-    if (p.jumpBuf > 0) tryJump(p);
+    if (p.jumpBuf > 0 && !posing && world.partyPhase !== "drop") tryJump(p);
 
     // ceiling (vent crawl)
     const { drawW, drawH } = playerSize(p);
@@ -1447,21 +2286,11 @@
     const feet = p.y + drawH * 0.42;
     if (world.partyPhase === "drop") {
       world.dropT = (world.dropT || 0) + dt;
-      if (feet >= fy || world.dropT > 1.1) {
-        p.y = fy - drawH * 0.42;
-        p.vy = 0;
-        p.onGround = true;
-        startPartyPhase("party");
+      if (feet >= fy || world.dropT > 1.2) {
+        startLandPose();
       }
     } else if (inVent && p.x > world.ventLen - 70) {
-      world.partyPhase = "drop";
-      world.dropT = 0;
-      p.vy = 220;
-      p.onGround = false;
-      elHint.textContent = "DOWN THE VENT!";
-      elHint.hidden = false;
-      world.hintT = 1.4;
-      sfxPoof();
+      startPartyPhase("drop");
     } else if (feet >= fy && world.partyPhase !== "drop") {
       p.y = fy - drawH * 0.42;
       p.vy = 0;
@@ -1497,33 +2326,44 @@
     }
 
     // dancers / bads
-    if (world.partyPhase === "party" || world.partyPhase === "boss" || world.partyPhase === "won") {
+    if (world.partyPhase === "party" || world.partyPhase === "boss" || world.partyPhase === "won" || world.partyPhase === "drop") {
       for (const d of world.partyDancers) {
         d.face = Math.sin(world.time * 2 + d.bob) > 0 ? 1 : -1;
       }
       for (const b of world.partyBads) {
         if (b.dead) continue;
+        if (b.flash > 0) b.flash -= dt;
         b.x += b.vx * dt;
         if (b.x < 360 || b.x > world.partyW - 80) b.vx *= -1;
-        if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - b.x, p.y - b.y) < 40) hitPlayer(p);
+        if (!posing && !p.ghost && p.invuln <= 0 && Math.hypot(p.x - b.x, p.y - b.y) < (b.r || 30) + 16) hitPlayer(p);
       }
     }
 
-    // boss hop
+    // boss flies, swoops, hovers
     const boss = world.partyBoss;
-    if (boss && world.partyPhase === "boss") {
-      boss.vy += 1500 * dt;
-      boss.y += boss.vy * dt;
-      const bFloor = fy - 90;
-      if (boss.y >= bFloor) {
-        boss.y = bFloor;
-        boss.vy = -420;
-      }
-      if (p.x > boss.x) boss.x += 50 * dt;
-      else boss.x -= 50 * dt;
+    if (boss && world.partyPhase === "boss" && !world.bossSquish) {
+      boss.flyT = (boss.flyT || 0) + dt;
+      const t = boss.flyT;
+      const home = boss.homeX != null ? boss.homeX : boss.x;
+      // slowly chase the agent on x while swooping
+      boss.homeX = home + clamp(((p.x + 120) - home) * dt * 0.55, -80 * dt, 80 * dt);
+      boss.x = boss.homeX + Math.sin(t * 1.35) * 130;
+      boss.y = fy - 210 + Math.sin(t * 2.15) * 78 + Math.cos(t * 0.85) * 36;
+      boss.y = clamp(boss.y, 90, fy - 70);
       if (boss.flash > 0) boss.flash -= dt;
       if (boss.hurt > 0) boss.hurt -= dt;
-      if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - boss.x, p.y - boss.y) < 70) hitPlayer(p);
+      const { w: bw, h: bh } = redEyeSize();
+      const feetY = p.y + drawH * 0.42;
+      const faceTop = boss.y - bh * 0.48;
+      const faceBot = boss.y - bh * 0.05;
+      const stomp = !p.ghost && p.vy > 90
+        && feetY >= faceTop - 16 && feetY <= faceBot + 24
+        && Math.abs(p.x - boss.x) < bw * 0.42;
+      if (stomp) {
+        startStompFinale();
+      } else if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - boss.x, p.y - boss.y) < Math.max(58, bw * 0.32)) {
+        hitPlayer(p);
+      }
     }
 
     // zaps
@@ -1535,17 +2375,25 @@
       if (world.partyPhase === "party") {
         for (const b of world.partyBads) {
           if (b.dead) continue;
-          if (Math.hypot(z.x - b.x, z.y - b.y) < (z.kind === "net" ? 46 : 36)) {
-            b.dead = true;
+          if (Math.hypot(z.x - b.x, z.y - b.y) < (z.kind === "net" ? b.r + 18 : b.r + 10)) {
             z.hit = true;
-            world.partyFound = Math.min(world.partyNeed, world.partyFound + 1);
-            addScore(p, 20, b.x, b.y);
-            burst(b.x, b.y);
+            b.hp = Math.max(0, (b.hp == null ? 3 : b.hp) - 1);
+            b.flash = 0.28;
+            addScore(p, 10, b.x, b.y);
             spawnZapFlash(b.x, b.y, false);
-            sfxCollect();
-            if (world.partyFound >= world.partyNeed) {
-              world.popups.push({ x: p.x, y: p.y - 50, t: 0, text: "All found!", color: "#7ed957" });
-              world.partyBossIn = 0.75;
+            world.shake = 5;
+            if (b.hp <= 0) {
+              b.dead = true;
+              world.partyFound = Math.min(world.partyNeed, world.partyFound + 1);
+              addScore(p, 20, b.x, b.y);
+              burst(b.x, b.y);
+              sfxCollect();
+              if (world.partyFound >= world.partyNeed) {
+                world.popups.push({ x: p.x, y: p.y - 50, t: 0, text: "All found!", color: "#7ed957" });
+                world.partyBossIn = 0.75;
+              }
+            } else {
+              beep(360, 0.07, "square", 0.06);
             }
             break;
           }
@@ -1563,14 +2411,19 @@
       if (!z.hit && boss && world.partyPhase === "boss") {
         if (Math.hypot(z.x - boss.x, z.y - boss.y) < (z.kind === "net" ? 82 : 70)) {
           z.hit = true;
-          world.partyBossLives = Math.max(0, world.partyBossLives - 1);
+          world.partyBossLives = Math.max(1, world.partyBossLives - 1);
           boss.flash = 0.25;
           boss.hurt = 0.35;
           addScore(p, 25, boss.x, boss.y);
           spawnZapFlash(boss.x, boss.y, false);
           world.shake = 8;
           beep(300, 0.08, "square", 0.07);
-          if (world.partyBossLives <= 0) finishPartyWin();
+          if (world.partyBossLives <= 1) {
+            elHint.textContent = "JUMP ON HIS FACE!";
+            elHint.hidden = false;
+            world.hintT = 3.2;
+            world.popups.push({ x: boss.x, y: boss.y - 60, t: 0, text: "Stomp his face!", color: "#ffe566" });
+          }
         }
       }
     }
@@ -1595,7 +2448,11 @@
     const cam = world.camX || 0;
     const phase = world.partyPhase;
     const fy = partyFloor();
-    if (phase === "vent" || phase === "drop") {
+    if (phase === "escape" || (phase === "won" && world.squareBoss)) {
+      drawPartyEscape();
+      return;
+    }
+    if (phase === "vent") {
       ctx.fillStyle = "#d8eef8";
       ctx.fillRect(-20, -20, W + 40, H + 40);
       ctx.save();
@@ -1697,6 +2554,17 @@
       ctx.fillStyle = "rgba(255,255,255,0.25)";
       ctx.fillRect(0, fy, world.partyW, 10);
 
+      // ceiling vent opening when dropping in
+      if (phase === "drop" || (world.landPoseT || 0) > 0.4) {
+        ctx.fillStyle = "#16324a";
+        ctx.beginPath();
+        ctx.ellipse(220, 8, 70, 26, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#2a4a6a";
+        ctx.beginPath();
+        ctx.ellipse(220, 8, 50, 16, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       for (const n of world.partyNotes || []) {
         ctx.save();
         ctx.globalAlpha = 0.85;
@@ -1705,6 +2573,8 @@
         ctx.fillText(n.glyph, n.x, n.y + Math.sin(world.time * 3 + n.x) * 8);
         ctx.restore();
       }
+      const crowd = (world.partyCrowd || []).slice().sort((a, b) => a.layer - b.layer);
+      for (const c of crowd) drawPartyCrowdBit(c);
       for (const d of world.partyDancers) drawPartyDancer(d);
       for (const b of world.partyBads) if (!b.dead) drawPartyBad(b);
       if (world.partyBoss && world.partyPhase !== "won") drawPartyBoss(world.partyBoss);
@@ -1783,6 +2653,24 @@
     ctx.restore();
   }
 
+  function drawPartyCrowdBit(c) {
+    const bob = Math.sin(world.time * (6 + c.layer) + c.bob) * (6 + c.layer * 2);
+    ctx.save();
+    ctx.translate(c.x, c.y + bob);
+    ctx.scale(c.s, c.s);
+    ctx.globalAlpha = 0.55 + c.layer * 0.15;
+    ctx.fillStyle = c.col;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-12, -6, 24, 28, 6);
+    else ctx.rect(-12, -6, 24, 28);
+    ctx.fill();
+    ctx.fillStyle = "#ffe0bd";
+    ctx.beginPath();
+    ctx.arc(0, -16, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawPartyDancer(d) {
     const bob = Math.sin(world.time * 8 + d.bob) * 10;
     const x = d.x, y = d.y + bob;
@@ -1825,27 +2713,44 @@
   function drawPartyBad(b) {
     const bob = Math.sin(world.time * 5 + b.bob) * 6;
     if (redEyeImg) {
-      const h = 64;
+      const h = b.h || 64;
       const w = (redEyeImg.width / redEyeImg.height) * h;
       ctx.save();
       ctx.translate(b.x, b.y + bob);
       ctx.rotate(Math.sin(world.time * 3 + b.bob) * 0.08);
+      if (b.flash > 0) ctx.globalAlpha = 0.5 + Math.sin(world.time * 40) * 0.4;
       drawOnlineSprite(redEyeImg, w, h, { noOutline: true, shine: 0.35 });
       // party hat
+      const hat = Math.max(16, h * 0.22);
       ctx.fillStyle = "#ff7ad9";
       ctx.strokeStyle = "#16324a";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(-12, -h * 0.42);
-      ctx.lineTo(0, -h * 0.42 - 22);
-      ctx.lineTo(12, -h * 0.42);
+      ctx.moveTo(-hat * 0.55, -h * 0.42);
+      ctx.lineTo(0, -h * 0.42 - hat);
+      ctx.lineTo(hat * 0.55, -h * 0.42);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = "#ffe566";
       ctx.beginPath();
-      ctx.arc(0, -h * 0.42 - 22, 4, 0, Math.PI * 2);
+      ctx.arc(0, -h * 0.42 - hat, 4, 0, Math.PI * 2);
       ctx.fill();
+      // 3 hit hearts
+      const hp = b.hp == null ? 3 : b.hp;
+      for (let i = 0; i < 3; i++) {
+        ctx.globalAlpha = i < hp ? 1 : 0.22;
+        ctx.fillStyle = i < hp ? "#ff5a7a" : "#16324a";
+        const hx = (i - 1) * 12;
+        const hy = -h * 0.52 - hat - 6;
+        ctx.beginPath();
+        ctx.moveTo(hx, hy + 3);
+        ctx.bezierCurveTo(hx, hy - 4, hx - 7, hy - 4, hx - 7, hy);
+        ctx.bezierCurveTo(hx - 7, hy + 5, hx, hy + 8, hx, hy + 11);
+        ctx.bezierCurveTo(hx, hy + 8, hx + 7, hy + 5, hx + 7, hy);
+        ctx.bezierCurveTo(hx + 7, hy - 4, hx, hy - 4, hx, hy + 3);
+        ctx.fill();
+      }
       ctx.restore();
     }
   }
@@ -1855,12 +2760,29 @@
     const { w, h } = redEyeSize();
     ctx.save();
     ctx.translate(b.x, b.y);
-    ctx.rotate(Math.sin(world.time * 2.4) * 0.12 + (b.hurt > 0 ? Math.sin(world.time * 20) * 0.08 : 0));
-    const squash = 1 + Math.sin(world.time * 3) * 0.1;
-    ctx.scale(1 / Math.sqrt(squash), squash);
+    const squish = b.squish || world.bossSquish || 0;
+    if (squish > 0) {
+      const k = clamp(squish, 0, 1);
+      ctx.translate(0, h * 0.28 * (1 - k * 0.2));
+      ctx.scale(1.55 + (1 - k) * 0.3, 0.28 + k * 0.1);
+      ctx.rotate(0.08);
+    } else {
+      const tilt = Math.sin((b.flyT || world.time) * 1.35) * 0.18;
+      ctx.rotate(tilt + (b.hurt > 0 ? Math.sin(world.time * 20) * 0.08 : 0));
+      const squash = 1 + Math.sin(world.time * 3) * 0.08;
+      ctx.scale(1 / Math.sqrt(squash), squash);
+    }
     if (b.flash > 0) ctx.globalAlpha = 0.55 + Math.sin(world.time * 40) * 0.35;
-    drawAura(0, 0, Math.max(w, h) * 0.9, "255,200,80", 0.5);
+    drawAura(0, 0, Math.max(w, h) * 0.95, squish > 0 ? "255,220,80" : "255,200,80", 0.55);
     drawOnlineSprite(redEyeImg, w, h, { noOutline: true, shine: 0.4 });
+    if (squish > 0) {
+      for (let i = 0; i < 7; i++) {
+        const a = world.time * 6 + i * 0.9;
+        ctx.fillStyle = "#ffe566";
+        ctx.font = "900 28px system-ui, sans-serif";
+        ctx.fillText("★", Math.cos(a) * 90, Math.sin(a) * 40 - 20);
+      }
+    }
     ctx.restore();
   }
 
@@ -4011,7 +4933,9 @@
       ctx.restore();
       return;
     }
-    if (state === "yard" || state === "intro") {
+    if (state === "partyout" || state === "partywalk") {
+      drawPartyOutside();
+    } else if (state === "yard" || state === "intro") {
       drawHouseOutside();
     } else if (isPartyMode()) {
       drawPartyScene();
@@ -4060,6 +4984,10 @@
     if (state === "yard" || state === "intro") {
       for (const p of world.players) drawPlayer(p);
       if (state === "yard") drawTapHouseHint();
+    }
+    if (state === "partyout" || state === "partywalk") {
+      for (const p of world.players) drawPlayer(p);
+      if (state === "partyout") drawTapMansionHint();
     }
 
     if (state === "play" || state === "over") {
@@ -4519,14 +5447,27 @@
     let stretch = p.boosting ? (ch.zippy ? 1.18 : (sky ? 1.2 : 1.13)) : (p.vy > 80 ? (sky ? 0.88 : 0.93) : 1);
     stretch *= breath;
     if (sky && ch.id === "flame") stretch *= 1 + Math.sin(world.time * 18) * 0.04;
-    const sx = 1 / Math.sqrt(stretch);
-    const sy = stretch;
-    const rot = clamp(p.vy * (sky ? -0.00075 : -0.00045), sky ? -0.3 : -0.2, sky ? 0.3 : 0.2)
+    const posing = isPartyMode() && ((p.landPose || 0) > 0 || (world.landPoseT || 0) > 0);
+    let sx = 1 / Math.sqrt(stretch);
+    let sy = stretch;
+    let rot = clamp(p.vy * (sky ? -0.00075 : -0.00045), sky ? -0.3 : -0.2, sky ? 0.3 : 0.2)
       + Math.sin(world.time * (sky ? 5.6 : 6.5) + p.slot) * (sky ? 0.055 : 0.035)
       + (p.giggle > 0 ? Math.sin(world.time * 36) * 0.14 : 0);
+    if (posing) {
+      sx = 1.28;
+      sy = 0.68;
+      rot = -0.36;
+    }
 
     ctx.save();
-    ctx.translate(p.x, p.y + bob);
+    ctx.translate(p.x, p.y + (posing ? 8 : bob));
+    if (posing) {
+      for (let i = 0; i < 8; i++) {
+        const a = world.time * 5 + i * (Math.PI / 4);
+        const rr = Math.max(drawW, drawH) * 0.7;
+        drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr * 0.45 - 10, 4.2, ["#ffe566", "#7af0ff", "#fff", "#ff7ad9"][i % 4]);
+      }
+    }
     ctx.rotate(rot);
     ctx.scale(sx, sy);
     if (isSkyBattleMode() && ch && (ch.id === "flame" || ch.id === "blaster") && !p.ghost) {
@@ -5059,6 +6000,10 @@
       if (tapHitsHouse(e.clientX, e.clientY)) startEnterHouse();
       return;
     }
+    if (state === "partyout") {
+      if (tapHitsPartyHouse(e.clientX, e.clientY)) startPartyEnter();
+      return;
+    }
     if (state === "play" && isGroundMode()) {
       requestJump(playerForPointerX(e.clientX));
       return;
@@ -5094,6 +6039,10 @@
       ensureAudio();
       if (state === "yard") {
         startEnterHouse();
+        return;
+      }
+      if (state === "partyout") {
+        startPartyEnter();
         return;
       }
       if (state === "play" && isGroundMode()) {
@@ -5141,7 +6090,7 @@
     e.preventDefault();
     ensureAudio();
     if (campaign === "adventure") { retryAdventureLevel(); return; }
-    skipNextIntro = !isYardMode();
+    skipNextIntro = !isYardMode() || isPartyMode();
     startGame();
   });
   document.getElementById("change").addEventListener("click", (e) => {
@@ -5640,21 +6589,21 @@
     mode = 1;
   }
 
-  function startAdventureLevel(index) {
+  function startAdventureLevel(index, quick) {
     campaign = "adventure";
     mode = 1;
     adventureLevel = clamp(index, 0, ADV_LEVELS.length - 1);
     pendingLevel = adventureLevel;
     const lv = ADV_LEVELS[adventureLevel];
     levelKind = lv.kind;
-    skipNextIntro = false;
+    const isPartyLv = lv && lv.kind === "party";
+    skipNextIntro = !!quick && isPartyLv;
     hideAdventureOverlays();
     startGame();
   }
 
   function retryAdventureLevel() {
-    skipNextIntro = false;
-    startAdventureLevel(adventureLevel);
+    startAdventureLevel(adventureLevel, true);
   }
 
   function maybeCompleteLevel() {
@@ -6265,6 +7214,48 @@
         skipNextIntro = true;
         startGame();
         if (world.players[0]) world.players[0].invuln = 0;
+      },
+      startPartyOutside: (id) => {
+        campaign = "party";
+        mode = 1;
+        chosen.p1 = FLAME_CHARS.find((x) => x.id === (id || "blaster")) || FLAME_CHARS[1] || FLAME_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = false;
+        startGame();
+      },
+      startPartyEnter: () => startPartyEnter(),
+      landPose: () => {
+        if (world.partyPhase === "vent" || !world.partyDancers || !world.partyDancers.length) spawnPartyRoom();
+        startLandPose();
+      },
+      stompBossNow: () => {
+        if (!world.partyBoss) startPartyPhase("boss");
+        startStompFinale();
+      },
+      startEscape: () => startPartyEscape(),
+      escapeShot: () => {
+        startPartyEscape();
+        const fy = H * 0.78;
+        const pl = world.players[0];
+        if (pl) { pl.x = 2860; pl.y = fy - 50; pl.facing = 1; pl.invuln = 0; }
+        world.camX = 2680;
+        world.escapeSquares = [];
+        for (let i = 0; i < 5; i++) {
+          world.escapeSquares.push({
+            x: 2760 + i * 58, y: fy - 18, vy: -40, pop: 0, alive: true, r: 16 + (i % 3) * 3, flash: 0, hop: i,
+          });
+        }
+        if (world.squareBoss) { world.squareBoss.x = 2768; world.squareBoss.y = fy - 168; }
+      },
+      setCam: (x) => { world.camX = x || 0; },
+      setBossPos: (x, y) => {
+        if (!world.partyBoss) startPartyPhase("boss");
+        const fy = partyFloor();
+        const b = world.partyBoss;
+        if (b) { b.x = x; b.y = y == null ? fy - 180 : y; b.homeX = x; b.flyT = 0.4; }
+        const p = world.players[0];
+        if (p && x) { p.x = x - 10; p.y = y == null ? fy - 260 : y - 80; }
+        world.camX = Math.max(0, (x || 0) - 180);
       },
       partyPhase: (ph) => { if (typeof startPartyPhase === "function") startPartyPhase(ph); },
       getPartyFound: () => world.partyFound || 0,

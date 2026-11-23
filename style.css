@@ -32,7 +32,7 @@ html, body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 130px 8px 12px;
   pointer-events: none;
   gap: 8px;
 }
@@ -430,6 +430,28 @@ h1 {
   line-height: 1;
 }
 .mute-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #16324a; }
+
+.home-btn {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  right: 72px;
+  z-index: 7;
+  appearance: none;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  min-height: 52px;
+  border-radius: 16px;
+  border: 4px solid #16324a;
+  background: #ffe566;
+  font-size: 26px;
+  box-shadow: 0 4px 0 #16324a;
+  cursor: pointer;
+  touch-action: manipulation;
+  line-height: 1;
+}
+.home-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #16324a; }
+.home-btn[hidden] { display: none !important; }
 
 #map-ui {
   position: fixed;

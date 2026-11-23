@@ -435,7 +435,7 @@
     } else if (isWestMode()) {
       elHint.textContent = "TAP TO JUMP!";
     } else if (isPartyMode()) {
-      elHint.textContent = "CRAWL THROUGH THE VENT!";
+      elHint.textContent = "CRAWL, OR TAP JUMP TO DROP IN!";
     } else if (isParkourMode()) {
       elHint.textContent = "TAP TO JUMP! Climb the ladders!";
     } else if (isChaseMode()) {
@@ -459,6 +459,7 @@
       beginPlay();
     }
     skipNextIntro = false;
+    updateHomeBtn();
   }
 
   function beginPlay() {
@@ -1010,6 +1011,11 @@
 
   function tryJump(p) {
     if (!p || p.ghost) return false;
+    if (isPartyMode() && world.partyPhase === "vent" && state === "play") {
+      p.jumpBuf = 0;
+      startPartyPhase("drop");
+      return true;
+    }
     if (isPartyMode() && ((world.landPoseT || 0) > 0 || (world.stompWinT || 0) > 0 || world.partyPhase === "drop")) return false;
     if (!(p.jumpBuf > 0) || (!(p.coyote > 0) && !p.climbing)) return false;
     p.climbing = false;
@@ -1577,7 +1583,7 @@
     }
     setZapBtn(true);
     setPartyPad(true);
-    elHint.textContent = "CRAWL THROUGH THE VENT!";
+    elHint.textContent = "CRAWL, OR TAP JUMP TO DROP IN!";
     elHint.hidden = false;
     world.hintT = 3.2;
     updateHud();
@@ -5944,6 +5950,7 @@
     dt = Math.min(dt, 0.05);
     update(dt);
     draw();
+    if ((updateHomeBtn._t || 0) !== state) { updateHomeBtn._t = state; updateHomeBtn(); }
   }
 
   // ---------- input ----------
@@ -6532,6 +6539,18 @@
     e.stopPropagation();
     toggleMute();
   });
+  const homeBtn = document.getElementById("btn-home");
+  if (homeBtn) {
+    homeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      goHome();
+    });
+    homeBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  }
   elBack.addEventListener("click", () => {
     if (pickStep === "p2") showPick("p1");
     else if (pickStep === "p1" && campaign === "house") showHousePlayers();
@@ -6574,6 +6593,44 @@
     if (end) end.hidden = true;
     if (vic) vic.hidden = true;
     if (pop) pop.hidden = true;
+    updateHomeBtn();
+  }
+
+  function updateHomeBtn() {
+    const btn = document.getElementById("btn-home");
+    if (!btn) return;
+    const overlayOn = (elOver && !elOver.hidden)
+      || (elStart && !elStart.hidden)
+      || (document.getElementById("level-end") && !document.getElementById("level-end").hidden)
+      || (document.getElementById("victory") && !document.getElementById("victory").hidden)
+      || (document.getElementById("map-ui") && !document.getElementById("map-ui").hidden);
+    const inPlay = state === "play" || state === "yard" || state === "intro"
+      || state === "partyout" || state === "partywalk";
+    btn.hidden = !inPlay || overlayOn;
+  }
+
+  function goHome() {
+    if (state === "start" || state === "load") return;
+    world.partyRetryT = 0;
+    world.stompWinT = 0;
+    world.landPoseT = 0;
+    world.partyRetrying = false;
+    world.partyBossIn = 0;
+    world.holdLeft = false;
+    world.holdRight = false;
+    world.caseOpen = false;
+    if (world.players) world.players.forEach((p) => { p.boosting = false; });
+    pointers.clear();
+    keysDown.clear();
+    syncBoosts();
+    hideAdventureOverlays();
+    elOver.hidden = true;
+    elHud.hidden = true;
+    elHint.hidden = true;
+    elStart.hidden = false;
+    state = "start";
+    showModeSelect();
+    updateHomeBtn();
   }
 
   function applyAdventureLevel() {
@@ -7105,6 +7162,7 @@
     state = "start";
     showModeSelect();
     elStart.hidden = false;
+    updateHomeBtn();
     requestAnimationFrame(loop);
 
     window.__turbo = {
@@ -7233,6 +7291,7 @@
         startStompFinale();
       },
       startEscape: () => startPartyEscape(),
+      goHome: () => goHome(),
       escapeShot: () => {
         startPartyEscape();
         const fy = H * 0.78;

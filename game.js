@@ -47,9 +47,11 @@
   let runnerImg = null;
   let gunImg = null;
   let shotImg = null;
-  let campaign = "classic"; // classic | house | adventure | chase | parkour | west | skybattle
+  let bubbleWepImg = null;
+  let netWepImg = null;
+  let campaign = "classic"; // classic | house | adventure | chase | parkour | west | skybattle | party
   let skipNextIntro = false;
-  let levelKind = "sky"; // sky | yard | house | boss | chase | parkour | west | skybattle
+  let levelKind = "sky"; // sky | yard | house | boss | chase | parkour | west | skybattle | party
   let adventureLevel = 0; // 0-based
   let pendingLevel = 0;
   let muted = false;
@@ -68,6 +70,7 @@
     { name: "Parkour House", kind: "parkour", goalDist: 5600, spawnScale: 1 },
     { name: "Wild West", kind: "west" },
     { name: "Sky Battle", kind: "skybattle" },
+    { name: "Secret Agent Party", kind: "party" },
   ];
   const START_CHARS = ["frog", "ape", "gorilla"];
   const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike", 6: "money", 7: "skater", 8: "sheriff", 9: "flame", 10: "blaster" };
@@ -80,7 +83,7 @@
     if (campaign === "house") return HOUSE_CHARS;
     if (campaign === "chase" || campaign === "parkour") return CHASE_CHARS;
     if (campaign === "west") return WEST_CHARS;
-    if (campaign === "skybattle") return FLAME_CHARS;
+    if (campaign === "skybattle" || campaign === "party") return FLAME_CHARS;
     if (campaign === "adventure") return allBuddies();
     return CHARS;
   }
@@ -98,8 +101,11 @@
   function isSkyBattleMode() {
     return campaign === "skybattle" || (campaign === "adventure" && levelKind === "skybattle");
   }
+  function isPartyMode() {
+    return campaign === "party" || (campaign === "adventure" && levelKind === "party");
+  }
   function isGroundMode() {
-    return campaign === "house" || isChaseMode() || isParkourMode() || isWestMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
+    return campaign === "house" || isChaseMode() || isParkourMode() || isWestMode() || isPartyMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
   }
   function isYardMode() {
     return campaign === "house" || (campaign === "adventure" && levelKind === "yard");
@@ -109,7 +115,7 @@
   }
 
   function defaultAdv() {
-    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
+    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
   }
   function loadAdv() {
     try {
@@ -118,10 +124,10 @@
       const d = JSON.parse(raw);
       const base = defaultAdv();
       if (!Array.isArray(d.stars)) d.stars = base.stars;
-      else if (d.stars.length < 11) d.stars = d.stars.concat([0, 0, 0, 0, 0, 0, 0].slice(0, 11 - d.stars.length));
-      else if (d.stars.length > 11) d.stars = d.stars.slice(0, 11);
+      else if (d.stars.length < 12) d.stars = d.stars.concat(Array(12).fill(0)).slice(0, 12);
+      else if (d.stars.length > 12) d.stars = d.stars.slice(0, 12);
       if (!Array.isArray(d.chars) || !d.chars.length) d.chars = base.chars;
-      d.unlockedThrough = Math.max(1, Math.min(11, d.unlockedThrough || 1));
+      d.unlockedThrough = Math.max(1, Math.min(12, d.unlockedThrough || 1));
       if ((d.stars[6] || 0) > 0) {
         d.unlockedThrough = Math.max(d.unlockedThrough, 8);
         if (d.chars.indexOf("money") === -1) d.chars.push("money");
@@ -139,6 +145,7 @@
         if (d.chars.indexOf("flame") === -1) d.chars.push("flame");
       }
       if ((d.stars[10] || 0) > 0) {
+        d.unlockedThrough = Math.max(d.unlockedThrough, 12);
         if (d.chars.indexOf("blaster") === -1) d.chars.push("blaster");
       }
       return d;
@@ -423,6 +430,8 @@
       elHint.textContent = "HOLD TO FLY!";
     } else if (isWestMode()) {
       elHint.textContent = "TAP TO JUMP!";
+    } else if (isPartyMode()) {
+      elHint.textContent = "CRAWL THROUGH THE VENT!";
     } else if (isParkourMode()) {
       elHint.textContent = "TAP TO JUMP! Climb the ladders!";
     } else if (isChaseMode()) {
@@ -461,6 +470,8 @@
         setupParkour();
       } else if (isWestMode()) {
         setupWest();
+      } else if (isPartyMode()) {
+        setupParty();
       } else if (!world.platforms.length) {
         const fy = houseFloorTop();
         world.platforms.push(makeHousePlatform("sofa", W * 0.58, fy - 44));
@@ -551,6 +562,9 @@
     elHint.hidden = true;
     elOver.hidden = false;
     setLassoBtn(false);
+    setZapBtn(false);
+    setPartyPad(false);
+    closeSuitcase();
 
     if (mode === 1) {
       const s = world.players[0] ? world.players[0].score : 0;
@@ -814,6 +828,11 @@
       return;
     }
 
+    if (isPartyMode()) {
+      updateParty(dt);
+      maybeCompleteLevel();
+      return;
+    }
     if (isGroundMode()) {
       updateHousePlay(dt);
       maybeCompleteLevel();
@@ -968,11 +987,11 @@
     if (!p || p.ghost) return false;
     if (!(p.jumpBuf > 0) || (!(p.coyote > 0) && !p.climbing)) return false;
     p.climbing = false;
-    p.vy = isChaseMode() ? -680 : ((isParkourMode() || isWestMode()) ? -700 : -720);
+    p.vy = isPartyMode() ? ((world.partyPhase === "vent") ? -500 : -700) : (isChaseMode() ? -680 : ((isParkourMode() || isWestMode()) ? -700 : -720));
     p.coyote = 0;
     p.jumpBuf = 0;
     p.onGround = false;
-    if (isChaseMode() || isParkourMode() || isWestMode()) {
+    if (isChaseMode() || isParkourMode() || isWestMode() || isPartyMode()) {
       const { drawH } = playerSize(p);
       for (let i = 0; i < 5; i++) {
         world.particles.push({
@@ -1157,6 +1176,754 @@
     if (b) b.hidden = !on;
   }
 
+  function setPartyPad(on) {
+    const pad = document.getElementById("party-pad");
+    if (pad) pad.hidden = !on;
+    if (!on) {
+      world.holdLeft = false;
+      world.holdRight = false;
+    }
+  }
+
+  function partyFloor() {
+    return world.partyPhase === "vent" || world.partyPhase === "drop" ? H * 0.70 : H * 0.78;
+  }
+
+  function setupParty() {
+    world.partyPhase = "vent";
+    world.partyFound = 0;
+    world.partyNeed = 8;
+    world.partyWon = false;
+    world.partyBossLives = 10;
+    world.partyBoss = null;
+    world.partyDancers = [];
+    world.partyBads = [];
+    world.partyNotes = [];
+    world.partyFans = [];
+    world.camX = 0;
+    world.camY = 0;
+    world.holdLeft = false;
+    world.holdRight = false;
+    world.ventLen = 2100;
+    world.partyW = 2800;
+    world.dropT = 0;
+    world.zapCool = 0;
+    world.zaps = [];
+    world.zapFlashes = [];
+    world.partyWeapon = null;
+    world.caseOpen = false;
+    world.partyBossIn = 0;
+    world.speed = 0;
+    world.goalDist = 0;
+    world.platforms = [];
+    world.obstacles = [];
+    world.stars = [];
+    const fy = partyFloor();
+    world.partyFans = [
+      { x: 520, y: fy - 36, r: 30, spin: 0, rate: 8 },
+      { x: 920, y: fy - 36, r: 30, spin: 1.2, rate: 9 },
+      { x: 1320, y: fy - 36, r: 30, spin: 2.4, rate: 7.5 },
+      { x: 1680, y: fy - 36, r: 30, spin: 0.6, rate: 8.5 },
+    ];
+    const p = world.players[0];
+    if (p) {
+      p.x = 150;
+      p.y = fy - 40;
+      p.vy = 0;
+      p.facing = 1;
+      p.onGround = true;
+    }
+    setZapBtn(true);
+    setPartyPad(true);
+    elHint.textContent = "CRAWL THROUGH THE VENT!";
+    elHint.hidden = false;
+    world.hintT = 3.2;
+  }
+
+  function startPartyPhase(phase) {
+    world.partyPhase = phase;
+    if (phase === "party") {
+      spawnPartyRoom();
+      const p = world.players[0];
+      const fy = partyFloor();
+      if (p) {
+        p.x = 220;
+        p.y = 80;
+        p.vy = 80;
+        p.onGround = false;
+        p.invuln = 1.1;
+      }
+      world.camX = 0;
+      elHint.textContent = "FIND THE BAD GUYS!";
+      elHint.hidden = false;
+      world.hintT = 3.2;
+    } else if (phase === "boss") {
+      const p = world.players[0];
+      const fy = partyFloor();
+      const bx = Math.max((p ? p.x : 200) + 150, (world.camX || 0) + W * 0.62);
+      world.partyBoss = { x: bx, y: fy - 90, vy: -200, flash: 0, hurt: 0, bob: 0 };
+      world.partyBossLives = 10;
+      elHint.textContent = "ZAP THE BIG VILLAIN!";
+      elHint.hidden = false;
+      world.hintT = 3.2;
+      world.popups.push({ x: (p ? p.x : 200) + 40, y: 200, t: 0, text: "The big villain!", color: "#ff7ad9" });
+      burst(bx, fy - 90);
+      sfxStart();
+    }
+  }
+
+  function spawnPartyRoom() {
+    const fy = H * 0.78;
+    world.partyDancers = [];
+    const cols = ["#ff7ad9", "#7ed957", "#7af0ff", "#ffe566", "#ff9a2a", "#c9a0ff", "#ff6b8a"];
+    for (let i = 0; i < 14; i++) {
+      world.partyDancers.push({
+        x: 260 + i * 170 + rand(-24, 24),
+        y: fy - 36,
+        col: cols[i % cols.length],
+        bob: rand(0, 8),
+        face: rand(0, 1) > 0.5 ? 1 : -1,
+        w: 28 + rand(0, 8),
+      });
+    }
+    world.partyBads = [];
+    const spots = [420, 760, 1040, 1320, 1600, 1880, 2160, 2440];
+    for (let i = 0; i < 8; i++) {
+      world.partyBads.push({
+        x: spots[i] + rand(-40, 40),
+        y: fy - 40,
+        bob: rand(0, 6),
+        vx: rand(0, 1) > 0.5 ? 40 : -40,
+        dead: false,
+        r: 30,
+      });
+    }
+    world.partyNotes = [];
+    for (let i = 0; i < 10; i++) {
+      world.partyNotes.push({
+        x: rand(200, 2600),
+        y: rand(90, 280),
+        s: rand(0.8, 1.4),
+        v: rand(16, 36),
+        glyph: i % 2 ? "♪" : "♫",
+      });
+    }
+  }
+
+  function firePartyZap() {
+    if (world.zapCool > 0 || world.partyWon || world.caseOpen) return;
+    const p = world.players[0];
+    if (!p || p.ghost) return;
+    if (!world.partyWeapon) {
+      elHint.textContent = "TAP THE SUITCASE!";
+      elHint.hidden = false;
+      world.hintT = 1.8;
+      beep(240, 0.08, "square", 0.05);
+      return;
+    }
+    const facing = p.facing || 1;
+    const { drawW, drawH } = playerSize(p);
+    const kind = world.partyWeapon;
+    const spd = kind === "bubble" ? 420 : (kind === "net" ? 500 : 620);
+    world.zaps = world.zaps || [];
+    world.zaps.push({
+      x: p.x + facing * drawW * 0.42,
+      y: p.y + 6,
+      vx: facing * spd,
+      vy: 0,
+      t: 0,
+      life: kind === "bubble" ? 1.15 : 0.9,
+      fromHelper: false,
+      kind: kind,
+    });
+    world.zapCool = kind === "bubble" ? 0.42 : 0.32;
+    sfxZap();
+  }
+
+  function openSuitcase() {
+    if (!isPartyMode() || world.partyWon) return;
+    world.caseOpen = true;
+    const tray = document.getElementById("suitcase-tray");
+    if (tray) tray.hidden = false;
+    const btn = document.getElementById("btn-suitcase");
+    if (btn) { btn.classList.remove("pop"); void btn.offsetWidth; btn.classList.add("pop"); }
+    document.querySelectorAll(".wep-card").forEach((c) => {
+      c.classList.toggle("selected", c.getAttribute("data-wep") === world.partyWeapon);
+    });
+    sfxCollect();
+  }
+
+  function closeSuitcase() {
+    world.caseOpen = false;
+    const tray = document.getElementById("suitcase-tray");
+    if (tray) tray.hidden = true;
+  }
+
+  function pickPartyWeapon(id) {
+    world.partyWeapon = id;
+    closeSuitcase();
+    const names = { blaster: "Blaster!", bubble: "Bubble Zapper!", net: "Net Launcher!" };
+    elHint.textContent = names[id] || "Got it!";
+    elHint.hidden = false;
+    world.hintT = 1.6;
+    sfxStart();
+  }
+
+  function drawPartyHeldWeapon(drawW, drawH) {
+    const kind = world.partyWeapon;
+    if (!kind) return;
+    const img = kind === "blaster" ? gunImg : (kind === "bubble" ? bubbleWepImg : netWepImg);
+    if (!img) return;
+    const gh = kind === "blaster" ? 42 : 40;
+    const gw = (img.width / img.height) * gh;
+    const p = world.players[0];
+    const facing = (p && p.facing) || 1;
+    ctx.save();
+    ctx.translate(drawW * 0.28 * facing, drawH * 0.1);
+    ctx.scale(facing, 1);
+    ctx.rotate(0.08);
+    ctx.drawImage(img, 0, -gh * 0.55, gw, gh);
+    ctx.restore();
+  }
+
+  function finishPartyWin() {
+    if (world.partyWon || world.levelDone) return;
+    world.partyWon = true;
+    world.partyPhase = "won";
+    const b = world.partyBoss;
+    if (b) {
+      burst(b.x, b.y);
+      coinBurst(b.x, b.y);
+    }
+    setZapBtn(false);
+    setPartyPad(false);
+    maybeCompleteLevel();
+  }
+
+  function updateParty(dt) {
+    if (world.partyWon) return;
+    const p = world.players[0];
+    if (!p) return;
+    if (world.partyBossIn > 0) {
+      world.partyBossIn -= dt;
+      if (world.partyBossIn <= 0 && world.partyPhase === "party") startPartyPhase("boss");
+    }
+    if (world.caseOpen) {
+      // still tick flashes / hints lightly
+      if (world.hintT > 0) { world.hintT -= dt; if (world.hintT <= 0) elHint.hidden = true; }
+      return;
+    }
+    const GRAVITY = 1600;
+    const fy = partyFloor();
+    const inVent = world.partyPhase === "vent";
+    const ceilY = inVent ? H * 0.34 : 40;
+
+    let dir = 0;
+    if (world.holdLeft) dir -= 1;
+    if (world.holdRight) dir += 1;
+    if (keysDown.has("ArrowLeft") || keysDown.has("KeyA")) dir -= 1;
+    if (keysDown.has("ArrowRight") || keysDown.has("KeyD")) dir += 1;
+    dir = clamp(dir, -1, 1);
+    if (dir) p.facing = dir;
+
+    const spd = inVent ? 190 : 240;
+    if (world.partyPhase !== "drop") p.x += dir * spd * dt;
+
+    p.vy += GRAVITY * dt;
+    p.y += p.vy * dt;
+    p.coyote = p.onGround ? 0.1 : Math.max(0, (p.coyote || 0) - dt);
+    p.jumpBuf = Math.max(0, (p.jumpBuf || 0) - dt);
+    if (p.invuln > 0) p.invuln -= dt;
+    if (p.jumpBuf > 0) tryJump(p);
+
+    // ceiling (vent crawl)
+    const { drawW, drawH } = playerSize(p);
+    const head = p.y - drawH * (inVent ? 0.28 : 0.45);
+    if (inVent && head < ceilY) {
+      p.y += ceilY - head;
+      if (p.vy < 0) p.vy = 0;
+    }
+
+    const feet = p.y + drawH * 0.42;
+    if (world.partyPhase === "drop") {
+      world.dropT = (world.dropT || 0) + dt;
+      if (feet >= fy || world.dropT > 1.1) {
+        p.y = fy - drawH * 0.42;
+        p.vy = 0;
+        p.onGround = true;
+        startPartyPhase("party");
+      }
+    } else if (inVent && p.x > world.ventLen - 70) {
+      world.partyPhase = "drop";
+      world.dropT = 0;
+      p.vy = 220;
+      p.onGround = false;
+      elHint.textContent = "DOWN THE VENT!";
+      elHint.hidden = false;
+      world.hintT = 1.4;
+      sfxPoof();
+    } else if (feet >= fy && world.partyPhase !== "drop") {
+      p.y = fy - drawH * 0.42;
+      p.vy = 0;
+      p.onGround = true;
+    } else {
+      p.onGround = false;
+    }
+
+    const minX = 80;
+    const maxX = inVent ? world.ventLen - 20 : world.partyW - 80;
+    p.x = clamp(p.x, minX, maxX);
+
+    // camera
+    const targetCam = clamp(p.x - W * 0.32, 0, (inVent ? world.ventLen : world.partyW) - W);
+    world.camX += (targetCam - (world.camX || 0)) * Math.min(1, dt * 6);
+    world.camY = 0;
+
+    if (world.zapCool > 0) world.zapCool -= dt;
+    if (world.hintT > 0) {
+      world.hintT -= dt;
+      if (world.hintT <= 0) elHint.hidden = true;
+    }
+    if (world.shake > 0) world.shake = Math.max(0, world.shake - 28 * dt);
+
+    // fans
+    if (inVent) {
+      for (const f of world.partyFans) {
+        f.spin += f.rate * dt;
+        if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - f.x, p.y - f.y) < f.r + 22) {
+          hitPlayer(p);
+        }
+      }
+    }
+
+    // dancers / bads
+    if (world.partyPhase === "party" || world.partyPhase === "boss" || world.partyPhase === "won") {
+      for (const d of world.partyDancers) {
+        d.face = Math.sin(world.time * 2 + d.bob) > 0 ? 1 : -1;
+      }
+      for (const b of world.partyBads) {
+        if (b.dead) continue;
+        b.x += b.vx * dt;
+        if (b.x < 360 || b.x > world.partyW - 80) b.vx *= -1;
+        if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - b.x, p.y - b.y) < 40) hitPlayer(p);
+      }
+    }
+
+    // boss hop
+    const boss = world.partyBoss;
+    if (boss && world.partyPhase === "boss") {
+      boss.vy += 1500 * dt;
+      boss.y += boss.vy * dt;
+      const bFloor = fy - 90;
+      if (boss.y >= bFloor) {
+        boss.y = bFloor;
+        boss.vy = -420;
+      }
+      if (p.x > boss.x) boss.x += 50 * dt;
+      else boss.x -= 50 * dt;
+      if (boss.flash > 0) boss.flash -= dt;
+      if (boss.hurt > 0) boss.hurt -= dt;
+      if (!p.ghost && p.invuln <= 0 && Math.hypot(p.x - boss.x, p.y - boss.y) < 70) hitPlayer(p);
+    }
+
+    // zaps
+    for (const z of (world.zaps || [])) {
+      z.x += z.vx * dt;
+      z.y += z.vy * dt;
+      z.t += dt;
+      if (z.hit) continue;
+      if (world.partyPhase === "party") {
+        for (const b of world.partyBads) {
+          if (b.dead) continue;
+          if (Math.hypot(z.x - b.x, z.y - b.y) < (z.kind === "net" ? 46 : 36)) {
+            b.dead = true;
+            z.hit = true;
+            world.partyFound = Math.min(world.partyNeed, world.partyFound + 1);
+            addScore(p, 20, b.x, b.y);
+            burst(b.x, b.y);
+            spawnZapFlash(b.x, b.y, false);
+            sfxCollect();
+            if (world.partyFound >= world.partyNeed) {
+              world.popups.push({ x: p.x, y: p.y - 50, t: 0, text: "All found!", color: "#7ed957" });
+              world.partyBossIn = 0.75;
+            }
+            break;
+          }
+        }
+        if (!z.hit) {
+          for (const d of world.partyDancers) {
+            if (Math.hypot(z.x - d.x, z.y - d.y) < 28) {
+              z.hit = true;
+              world.popups.push({ x: d.x, y: d.y - 36, t: 0, text: "Oops! Friend!", color: "#ffe566" });
+              break;
+            }
+          }
+        }
+      }
+      if (!z.hit && boss && world.partyPhase === "boss") {
+        if (Math.hypot(z.x - boss.x, z.y - boss.y) < (z.kind === "net" ? 82 : 70)) {
+          z.hit = true;
+          world.partyBossLives = Math.max(0, world.partyBossLives - 1);
+          boss.flash = 0.25;
+          boss.hurt = 0.35;
+          addScore(p, 25, boss.x, boss.y);
+          spawnZapFlash(boss.x, boss.y, false);
+          world.shake = 8;
+          beep(300, 0.08, "square", 0.07);
+          if (world.partyBossLives <= 0) finishPartyWin();
+        }
+      }
+    }
+    world.zaps = (world.zaps || []).filter((z) => z.t < z.life && !z.hit);
+
+    for (const n of world.partyNotes || []) {
+      n.y -= n.v * dt;
+      if (n.y < 50) { n.y = 320; n.x = rand(200, world.partyW - 200); }
+    }
+    for (const part of world.particles) {
+      part.x += part.vx * dt;
+      part.y += part.vy * dt;
+      part.t += dt;
+    }
+    world.particles = (world.particles || []).filter((pt) => pt.t < pt.life);
+    for (const pop of world.popups) pop.t += dt;
+    world.popups = (world.popups || []).filter((pop) => pop.t < 0.7);
+    if (world.time && Math.floor(world.time * 4) !== Math.floor((world.time - dt) * 4)) updateHud();
+  }
+
+  function drawPartyScene() {
+    const cam = world.camX || 0;
+    const phase = world.partyPhase;
+    const fy = partyFloor();
+    if (phase === "vent" || phase === "drop") {
+      ctx.fillStyle = "#d8eef8";
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+      ctx.save();
+      ctx.translate(-cam, 0);
+      const len = world.ventLen + 80;
+      // tunnel walls
+      ctx.fillStyle = "#b8c8d8";
+      ctx.fillRect(0, 0, len, H * 0.34);
+      ctx.fillRect(0, H * 0.70, len, H);
+      // riveted metal mid
+      ctx.fillStyle = "#9eb4c8";
+      ctx.fillRect(0, H * 0.34, len, 18);
+      ctx.fillRect(0, H * 0.70 - 18, len, 18);
+      ctx.fillStyle = "#e8f6ff";
+      ctx.fillRect(0, H * 0.36, len, H * 0.32);
+      // light strips
+      for (let x = 80; x < len; x += 180) {
+        ctx.fillStyle = "rgba(255,240,120,0.35)";
+        ctx.fillRect(x, H * 0.38, 50, H * 0.28);
+        ctx.fillStyle = "#ffe566";
+        ctx.beginPath();
+        ctx.arc(x + 25, H * 0.37, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // hole at end
+      ctx.fillStyle = "#16324a";
+      ctx.fillRect(world.ventLen - 90, H * 0.70 - 8, 120, 160);
+      ctx.fillStyle = "#2a4a6a";
+      for (let i = 0; i < 4; i++) ctx.fillRect(world.ventLen - 82 + i * 28, H * 0.70, 8, 80);
+      // grate
+      if (phase === "vent") {
+        ctx.strokeStyle = "#16324a";
+        ctx.lineWidth = 5;
+        ctx.strokeRect(world.ventLen - 90, H * 0.70 - 8, 120, 16);
+      }
+      for (const f of world.partyFans) drawPartyFan(f);
+      ctx.restore();
+    } else {
+      // mansion party
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#5b2a8a");
+      g.addColorStop(0.35, "#7a3cb8");
+      g.addColorStop(0.55, "#ff7ad9");
+      g.addColorStop(1, "#ffe566");
+      ctx.fillStyle = g;
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+      // keep it bright: overlay a light wash
+      ctx.fillStyle = "rgba(255,255,220,0.18)";
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+      ctx.save();
+      ctx.translate(-cam, 0);
+      // walls / windows
+      ctx.fillStyle = "#fff1c8";
+      ctx.fillRect(0, 0, world.partyW, fy);
+      for (let x = 160; x < world.partyW; x += 280) {
+        ctx.fillStyle = "#7af0ff";
+        ctx.fillRect(x, 70, 90, 110);
+        ctx.strokeStyle = "#16324a";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(x, 70, 90, 110);
+        ctx.beginPath();
+        ctx.moveTo(x + 45, 70); ctx.lineTo(x + 45, 180);
+        ctx.moveTo(x, 125); ctx.lineTo(x + 90, 125);
+        ctx.stroke();
+      }
+      // disco ball
+      const dbx = 280;
+      ctx.fillStyle = "#cfd8e8";
+      ctx.fillRect(dbx - 2, 0, 4, 50);
+      const pulse = 0.7 + Math.sin(world.time * 6) * 0.3;
+      ctx.fillStyle = "#e8f0ff";
+      ctx.beginPath();
+      ctx.arc(dbx, 70, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#16324a";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      // sweeping lights (friendly, bright)
+      const cols = ["rgba(255,122,217,0.22)", "rgba(122,240,255,0.22)", "rgba(255,229,102,0.22)", "rgba(126,217,87,0.22)"];
+      for (let i = 0; i < 4; i++) {
+        const a = world.time * 1.2 + i * 1.6;
+        ctx.fillStyle = cols[i];
+        ctx.beginPath();
+        ctx.moveTo(dbx, 70);
+        ctx.lineTo(dbx + Math.cos(a) * 900, fy);
+        ctx.lineTo(dbx + Math.cos(a + 0.35) * 900, fy);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // dance floor
+      const tile = 54;
+      for (let x = 0; x < world.partyW; x += tile) {
+        for (let y = fy; y < H; y += tile) {
+          const on = ((x / tile + y / tile) | 0) % 2 === 0;
+          ctx.fillStyle = on ? "#ff7ad9" : "#7af0ff";
+          ctx.fillRect(x, y, tile, tile);
+        }
+      }
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      ctx.fillRect(0, fy, world.partyW, 10);
+
+      for (const n of world.partyNotes || []) {
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.font = "900 " + (28 * n.s) + "px system-ui, sans-serif";
+        ctx.fillStyle = "#16324a";
+        ctx.fillText(n.glyph, n.x, n.y + Math.sin(world.time * 3 + n.x) * 8);
+        ctx.restore();
+      }
+      for (const d of world.partyDancers) drawPartyDancer(d);
+      for (const b of world.partyBads) if (!b.dead) drawPartyBad(b);
+      if (world.partyBoss && world.partyPhase !== "won") drawPartyBoss(world.partyBoss);
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.translate(-cam, 0);
+    for (const part of world.particles || []) drawParticle(part);
+    for (const plr of world.players) drawPlayer(plr);
+    drawPartyZaps();
+    for (const pop of world.popups || []) {
+      ctx.save();
+      ctx.globalAlpha = 1 - pop.t / 0.7;
+      ctx.font = "800 26px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = pop.color || "#16324a";
+      ctx.lineWidth = 5;
+      ctx.strokeText(pop.text, pop.x, pop.y);
+      ctx.fillText(pop.text, pop.x, pop.y);
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // HUD banners
+    if (world.partyPhase === "party" || world.partyPhase === "boss" || world.partyPhase === "won") {
+      const n = world.partyFound || 0;
+      const need = world.partyNeed || 8;
+      const label = "Bad guys: " + n + "/" + need;
+      drawPartyBanner(W / 2, 92, label);
+    }
+    if (world.partyPhase === "boss" || (world.partyPhase === "won" && world.partyBoss)) {
+      drawPartyBanner(W / 2, 148, "Villain: ❤️x" + (world.partyBossLives == null ? 10 : world.partyBossLives), 0.92);
+    }
+  }
+
+  function drawPartyBanner(x, y, label, sc) {
+    ctx.save();
+    ctx.font = "900 28px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const tw = ctx.measureText(label).width;
+    const bw = tw + 32, bh = 48;
+    ctx.fillStyle = "rgba(255, 250, 230, 0.94)";
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, 14);
+    else ctx.rect(x - bw / 2, y - bh / 2, bw, bh);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#16324a";
+    ctx.fillText(label, x, y + 1);
+    ctx.restore();
+  }
+
+  function drawPartyFan(f) {
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.rotate(f.spin);
+    ctx.fillStyle = "#16324a";
+    ctx.beginPath();
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#7af0ff";
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 4; i++) {
+      ctx.rotate(Math.PI / 2);
+      ctx.beginPath();
+      ctx.ellipse(0, -18, 8, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPartyDancer(d) {
+    const bob = Math.sin(world.time * 8 + d.bob) * 10;
+    const x = d.x, y = d.y + bob;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(d.face || 1, 1);
+    ctx.fillStyle = d.col;
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(-d.w / 2, -8, d.w, 36, 8) : ctx.rect(-d.w / 2, -8, d.w, 36);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffe0bd";
+    ctx.beginPath();
+    ctx.arc(0, -20, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#16324a";
+    ctx.beginPath();
+    ctx.arc(-4, -22, 2, 0, Math.PI * 2);
+    ctx.arc(4, -22, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, -16, 4, 0, Math.PI);
+    ctx.stroke();
+    // happy arms up
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-d.w / 2, 0);
+    ctx.lineTo(-d.w / 2 - 8, -18 + Math.sin(world.time * 8 + d.bob) * 6);
+    ctx.moveTo(d.w / 2, 0);
+    ctx.lineTo(d.w / 2 + 8, -18 + Math.cos(world.time * 8 + d.bob) * 6);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPartyBad(b) {
+    const bob = Math.sin(world.time * 5 + b.bob) * 6;
+    if (redEyeImg) {
+      const h = 64;
+      const w = (redEyeImg.width / redEyeImg.height) * h;
+      ctx.save();
+      ctx.translate(b.x, b.y + bob);
+      ctx.rotate(Math.sin(world.time * 3 + b.bob) * 0.08);
+      drawOnlineSprite(redEyeImg, w, h, { noOutline: true, shine: 0.35 });
+      // party hat
+      ctx.fillStyle = "#ff7ad9";
+      ctx.strokeStyle = "#16324a";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-12, -h * 0.42);
+      ctx.lineTo(0, -h * 0.42 - 22);
+      ctx.lineTo(12, -h * 0.42);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#ffe566";
+      ctx.beginPath();
+      ctx.arc(0, -h * 0.42 - 22, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawPartyBoss(b) {
+    if (!redEyeImg) return;
+    const { w, h } = redEyeSize();
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(Math.sin(world.time * 2.4) * 0.12 + (b.hurt > 0 ? Math.sin(world.time * 20) * 0.08 : 0));
+    const squash = 1 + Math.sin(world.time * 3) * 0.1;
+    ctx.scale(1 / Math.sqrt(squash), squash);
+    if (b.flash > 0) ctx.globalAlpha = 0.55 + Math.sin(world.time * 40) * 0.35;
+    drawAura(0, 0, Math.max(w, h) * 0.9, "255,200,80", 0.5);
+    drawOnlineSprite(redEyeImg, w, h, { noOutline: true, shine: 0.4 });
+    ctx.restore();
+  }
+
+  function drawPartyZaps() {
+    for (const z of (world.zaps || [])) {
+      const ang = Math.atan2(z.vy, z.vx);
+      ctx.save();
+      ctx.translate(z.x, z.y);
+      ctx.rotate(ang);
+      if (z.kind === "bubble") {
+        const r = 16 + Math.sin((z.t || 0) * 20) * 2;
+        ctx.fillStyle = "rgba(120,240,255,0.75)";
+        ctx.strokeStyle = "#16324a";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.beginPath(); ctx.arc(-5, -5, 5, 0, Math.PI * 2); ctx.fill();
+      } else if (z.kind === "net") {
+        ctx.strokeStyle = "#7ed957";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 18, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = "#16324a";
+        ctx.lineWidth = 2.5;
+        for (let i = 0; i < 4; i++) {
+          const a = i * Math.PI / 4 + world.time * 8;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * 18, Math.sin(a) * 18);
+          ctx.lineTo(Math.cos(a + Math.PI) * 18, Math.sin(a + Math.PI) * 18);
+          ctx.stroke();
+        }
+      } else if (shotImg) {
+        const sh = 36;
+        const sw = (shotImg.width / shotImg.height) * sh;
+        ctx.rotate(-Math.PI / 2);
+        ctx.drawImage(shotImg, -sw / 2, -sh / 2, sw, sh);
+      } else {
+        ctx.fillStyle = "#7af0ff";
+        ctx.beginPath();
+        ctx.arc(0, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    for (const f of (world.zapFlashes || [])) {
+      // flashes use screen? they're in world coords; already under cam
+    }
+    for (const f of (world.zapFlashes || [])) {
+      const u = Math.min(1, (f.t || 0) / (f.life || 0.3));
+      const a = 1 - u;
+      const r = 14 + u * 40;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = "rgba(255,90,220,0.7)";
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      f.t = (f.t || 0) + 0.016;
+    }
+  }
+
   function redEyeSize() {
     const img = redEyeImg;
     const h = 168;
@@ -1274,6 +2041,7 @@
   }
 
   function fireZap(fromHelper) {
+    if (isPartyMode()) { firePartyZap(); return; }
     if (!fromHelper && world.zapCool > 0) return;
     const p = world.players[0];
     if (!p || p.ghost) return;
@@ -1685,6 +2453,7 @@
   }
 
   function drawHeldGun(drawW, drawH, fromHelper) {
+    if (isPartyMode()) { drawPartyHeldWeapon(drawW, drawH); return; }
     if (!gunImg || !isSkyBattleMode()) return;
     const gh = fromHelper ? 34 : 42;
     const gw = (gunImg.width / gunImg.height) * gh;
@@ -3244,6 +4013,8 @@
     }
     if (state === "yard" || state === "intro") {
       drawHouseOutside();
+    } else if (isPartyMode()) {
+      drawPartyScene();
     } else if (isParkourMode()) {
       drawParkourHouse();
     } else if (isWestMode()) {
@@ -3292,7 +4063,9 @@
     }
 
     if (state === "play" || state === "over") {
-      if (isParkourMode()) {
+      if (isPartyMode()) {
+        /* scene + actors already drawn in drawPartyScene */
+      } else if (isParkourMode()) {
         for (const pl of world.platforms) drawParkourPlatform(pl);
         for (const lad of (world.ladders || [])) drawLadder(lad);
         drawParkourDoor();
@@ -3301,6 +4074,9 @@
       } else if (isGroundMode()) {
         for (const pl of world.platforms) drawHousePlatform(pl);
       }
+      if (isPartyMode()) {
+        /* skip world-space draws; already in drawPartyScene */
+      } else {
       if (campaign === "adventure" && world.goalDist && !isParkourMode() && !isWestMode()) drawFinishLine();
       for (const o of world.obstacles) drawObstacle(o);
       for (const st of world.stars) if (!st.got) drawStar(st);
@@ -3323,6 +4099,7 @@
         ctx.strokeText(pop.text, pop.x, pop.y);
         ctx.fillText(pop.text, pop.x, pop.y);
         ctx.restore();
+      }
       }
     }
 
@@ -3789,8 +4566,9 @@
       ctx.drawImage(ch.flameImg, -drawW / 2, -drawH / 2, drawW, drawH);
       ctx.restore();
     }
-    if (isSkyBattleMode()) {
-      drawOnlineSprite(ch.image, drawW, drawH, { noOutline: true, shine: ch.id === "flame" ? 0.4 + Math.sin(world.time * 18) * 0.12 : 0.4 });
+    if (isSkyBattleMode() || isPartyMode()) {
+      if (isSkyBattleMode()) drawOnlineSprite(ch.image, drawW, drawH, { noOutline: true, shine: ch.id === "flame" ? 0.4 + Math.sin(world.time * 18) * 0.12 : 0.4 });
+      else ctx.drawImage(ch.image, -drawW / 2, -drawH / 2, drawW, drawH);
       drawHeldGun(drawW, drawH, false);
     }
     else ctx.drawImage(ch.image, -drawW / 2, -drawH / 2, drawW, drawH);
@@ -4334,6 +5112,20 @@
       keysDown.delete(e.code);
       syncBoosts();
     }
+    if (e.code === "ArrowLeft" || e.code === "ArrowRight" || e.code === "KeyA" || e.code === "KeyD") {
+      keysDown.delete(e.code);
+    }
+  });
+  window.addEventListener("keydown", (e) => {
+    if (!isPartyMode() || state !== "play") return;
+    if (e.code === "ArrowLeft" || e.code === "ArrowRight" || e.code === "KeyA" || e.code === "KeyD") {
+      keysDown.add(e.code);
+      e.preventDefault();
+    }
+    if (e.repeat) return;
+    if (e.code === "KeyZ" || e.code === "KeyK") { e.preventDefault(); firePartyZap(); }
+    if (e.code === "KeyC" || e.code === "KeyE") { e.preventDefault(); if (world.caseOpen) closeSuitcase(); else openSuitcase(); }
+    if (e.code === "Escape" && world.caseOpen) { e.preventDefault(); closeSuitcase(); }
   });
 
   const prevent = (e) => { e.preventDefault(); };
@@ -4370,6 +5162,7 @@
     chosen = { p1: null, p2: null };
     setLassoBtn(false);
     setZapBtn(false);
+    setPartyPad(false);
     elModes.hidden = false;
     elCards.hidden = true;
     elPrompt.hidden = true;
@@ -4383,6 +5176,8 @@
     if (westBtn) westBtn.hidden = false;
     const skyBtn = document.getElementById("modeSkyBattle");
     if (skyBtn) skyBtn.hidden = false;
+    const partyBtn = document.getElementById("modeParty");
+    if (partyBtn) partyBtn.hidden = false;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = false;
     const free = document.querySelector(".free-play-label");
@@ -4408,6 +5203,8 @@
     if (westBtn) westBtn.hidden = true;
     const skyBtn = document.getElementById("modeSkyBattle");
     if (skyBtn) skyBtn.hidden = true;
+    const partyBtn = document.getElementById("modeParty");
+    if (partyBtn) partyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -4433,6 +5230,8 @@
     if (westBtn) westBtn.hidden = true;
     const skyBtn = document.getElementById("modeSkyBattle");
     if (skyBtn) skyBtn.hidden = true;
+    const partyBtn = document.getElementById("modeParty");
+    if (partyBtn) partyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -4462,6 +5261,8 @@
     if (westBtn) westBtn.hidden = true;
     const skyBtn = document.getElementById("modeSkyBattle");
     if (skyBtn) skyBtn.hidden = true;
+    const partyBtn = document.getElementById("modeParty");
+    if (partyBtn) partyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -4491,6 +5292,8 @@
     if (westBtn) westBtn.hidden = true;
     const skyBtn = document.getElementById("modeSkyBattle");
     if (skyBtn) skyBtn.hidden = true;
+    const partyBtn = document.getElementById("modeParty");
+    if (partyBtn) partyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -4522,6 +5325,8 @@
       elTagline.textContent = "Wild West — pick a buddy!";
     } else if (campaign === "skybattle") {
       elTagline.textContent = "Sky Battle — pick a buddy!";
+    } else if (campaign === "party") {
+      elTagline.textContent = "Secret Agent Party — pick a buddy!";
     } else {
       elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
     }
@@ -4627,6 +5432,8 @@
     if (westBtn) westBtn.hidden = true;
     const skyBtn = document.getElementById("modeSkyBattle");
     if (skyBtn) skyBtn.hidden = true;
+    const partyBtn = document.getElementById("modeParty");
+    if (partyBtn) partyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -4646,6 +5453,40 @@
     ensureAudio();
     showSkyBattlePick();
   });
+  function showPartyPick() {
+    campaign = "party";
+    mode = 1;
+    pickStep = "p1";
+    chosen = { p1: null, p2: null };
+    elModes.hidden = true;
+    elCards.hidden = false;
+    elPrompt.hidden = false;
+    elBack.hidden = false;
+    document.getElementById("modeHouse").hidden = true;
+    const chaseBtn = document.getElementById("modeChase");
+    if (chaseBtn) chaseBtn.hidden = true;
+    const parkBtn = document.getElementById("modeParkour");
+    if (parkBtn) parkBtn.hidden = true;
+    const westBtn = document.getElementById("modeWest");
+    if (westBtn) westBtn.hidden = true;
+    const skyBtn = document.getElementById("modeSkyBattle");
+    if (skyBtn) skyBtn.hidden = true;
+    const partyBtn = document.getElementById("modeParty");
+    if (partyBtn) partyBtn.hidden = true;
+    const advBtn = document.getElementById("modeAdventure");
+    if (advBtn) advBtn.hidden = true;
+    const free = document.querySelector(".free-play-label");
+    if (free) free.hidden = true;
+    elTagline.textContent = "Secret Agent Party — pick a buddy!";
+    elPrompt.textContent = "Pick the secret agent!";
+    elPrompt.className = "pick-prompt";
+    renderCards();
+    refreshCards();
+  }
+  document.getElementById("modeParty").addEventListener("click", () => {
+    ensureAudio();
+    showPartyPick();
+  });
   document.getElementById("btn-lasso").addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -4658,6 +5499,48 @@
     ensureAudio();
     fireZap(false);
   });
+  function bindHold(id, flag) {
+    const b = document.getElementById(id);
+    if (!b) return;
+    const down = (e) => { e.preventDefault(); e.stopPropagation(); world[flag] = true; };
+    const up = () => { world[flag] = false; };
+    b.addEventListener("pointerdown", down);
+    b.addEventListener("pointerup", up);
+    b.addEventListener("pointercancel", up);
+    b.addEventListener("pointerleave", up);
+  }
+  bindHold("btn-left", "holdLeft");
+  bindHold("btn-right", "holdRight");
+  const jumpBtn = document.getElementById("btn-jump");
+  if (jumpBtn) {
+    jumpBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ensureAudio();
+      if (state === "play") requestJump(1);
+    });
+  }
+  const caseBtn = document.getElementById("btn-suitcase");
+  if (caseBtn) {
+    caseBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ensureAudio();
+      openSuitcase();
+    });
+  }
+  document.querySelectorAll(".wep-card").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ensureAudio();
+      pickPartyWeapon(card.getAttribute("data-wep"));
+    });
+  });
+  const caseClose = document.getElementById("btn-case-close");
+  if (caseClose) caseClose.addEventListener("click", (e) => { e.preventDefault(); closeSuitcase(); });
+  const caseTray = document.getElementById("suitcase-tray");
+  if (caseTray) caseTray.addEventListener("click", (e) => { if (e.target === caseTray) closeSuitcase(); });
   document.getElementById("modeAdventure").addEventListener("click", () => {
     ensureAudio();
     showAdventureMap();
@@ -4728,6 +5611,8 @@
   function hideAdventureOverlays() {
     setLassoBtn(false);
     setZapBtn(false);
+    setPartyPad(false);
+    closeSuitcase();
     const mapUi = document.getElementById("map-ui");
     const end = document.getElementById("level-end");
     const vic = document.getElementById("victory");
@@ -4782,6 +5667,12 @@
       else chaseFreeWin();
       return;
     }
+    if (isPartyMode()) {
+      if (!world.partyWon) return;
+      if (campaign === "adventure") levelComplete();
+      else chaseFreeWin();
+      return;
+    }
     if (!world.goalDist || world.dist < world.goalDist) return;
     if (campaign === "adventure") {
       if (world.bossMode) return;
@@ -4800,9 +5691,11 @@
     elOver.hidden = false;
     setLassoBtn(false);
     setZapBtn(false);
+    setPartyPad(false);
+    closeSuitcase();
     const s = world.players[0] ? world.players[0].score : 0;
     const best = setBest(s);
-    elOverTitle.textContent = isSkyBattleMode() ? "You zapped him!" : (isWestMode() ? "Yeehaw! Gotcha!" : (isParkourMode() ? "You made it!" : "You got away!"));
+    elOverTitle.textContent = isPartyMode() ? "Mission complete!" : (isSkyBattleMode() ? "You zapped him!" : (isWestMode() ? "Yeehaw! Gotcha!" : (isParkourMode() ? "You made it!" : "You got away!")));
     elOver1p.hidden = false;
     elOver2p.hidden = true;
     document.getElementById("over-score").textContent = String(s);
@@ -4836,7 +5729,7 @@
       const prev = advSave.stars[adventureLevel] || 0;
       advSave.stars[adventureLevel] = Math.max(prev, stars);
       if (advSave.unlockedThrough < adventureLevel + 2) {
-        advSave.unlockedThrough = Math.min(11, adventureLevel + 2);
+        advSave.unlockedThrough = Math.min(12, adventureLevel + 2);
       }
       const rewardId = UNLOCK_BY_LEVEL[adventureLevel];
       if (rewardId && advSave.chars.indexOf(rewardId) === -1) {
@@ -4846,7 +5739,7 @@
         showUnlockToast(unlockedName);
       }
       writeAdv();
-      title.textContent = "Level Complete!";
+      title.textContent = isPartyMode() ? "Mission complete!" : "Level Complete!";
       starsEl.innerHTML = "★".repeat(stars) + "☆".repeat(3 - stars);
       msg.textContent = unlockedName ? ("Unlocked: " + unlockedName + "!") : "Nice job!";
       const hasNext = adventureLevel < ADV_LEVELS.length - 1;
@@ -4896,6 +5789,9 @@
     }
     if (ADV_LEVELS[index] && ADV_LEVELS[index].kind === "skybattle") {
       chosen.p1 = allBuddies().find((c) => c.id === "flame" && isCharUnlocked(c.id)) || chosen.p1;
+    }
+    if (ADV_LEVELS[index] && ADV_LEVELS[index].kind === "party") {
+      chosen.p1 = allBuddies().find((c) => c.id === "blaster" && isCharUnlocked(c.id)) || allBuddies().find((c) => c.id === "blaster") || chosen.p1;
     }
     if (!chosen.p1 || !isCharUnlocked(chosen.p1.id)) {
       chosen.p1 = allBuddies().find((c) => isCharUnlocked(c.id)) || CHARS[0];
@@ -4976,6 +5872,7 @@
       { x: 0.30, y: 0.28 },
       { x: 0.72, y: 0.20 },
       { x: 0.28, y: 0.10 },
+      { x: 0.72, y: 0.08 },
     ];
     const pts = nodes.map((n) => ({ x: n.x * W, y: n.y * H }));
     ctx.lineWidth = 18;
@@ -5001,7 +5898,7 @@
       const pulse = (unlocked && i === advSave.unlockedThrough - 1) ? 1 + Math.sin(world.time * 4) * 0.08 : 1;
       const r = 28 * pulse;
       ctx.beginPath();
-      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 10 ? "#7af0ff" : i === 9 ? "#ffc14d" : i === 8 ? "#ffe566" : i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
+      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 11 ? "#c9a0ff" : i === 10 ? "#7af0ff" : i === 9 ? "#ffc14d" : i === 8 ? "#ffe566" : i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
       ctx.strokeStyle = "#16324a";
       ctx.lineWidth = 4;
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -5117,7 +6014,7 @@
   function showVictory() {
     if (state === "victory") return;
     world.levelDone = true;
-    if (advSave.unlockedThrough < 11) advSave.unlockedThrough = 11;
+    if (advSave.unlockedThrough < 12) advSave.unlockedThrough = 12;
     writeAdv();
     state = "victory";
     world.players.forEach((p) => { p.boosting = false; });
@@ -5236,6 +6133,8 @@
         loadImage("assets/starburst_box.png").then((img) => { starburstImg = img; }),
         loadImage("assets/sky_gun.png").then((img) => { gunImg = img; }),
         loadImage("assets/sky_shot.png").then((img) => { shotImg = img; }),
+        loadImage("assets/wep_bubble.png").then((img) => { bubbleWepImg = img; }),
+        loadImage("assets/wep_net.png").then((img) => { netWepImg = img; }),
       ];
       await Promise.all(CHARS.map(async (c) => {
         c.image = await loadImage(c.src);
@@ -5354,6 +6253,21 @@
         startGame();
         if (world.players[0]) world.players[0].invuln = 0;
       },
+      startParty: (id) => {
+        campaign = "party";
+        mode = 1;
+        chosen.p1 = FLAME_CHARS.find((x) => x.id === (id || "blaster")) || FLAME_CHARS[1] || FLAME_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = true;
+        startGame();
+        if (world.players[0]) world.players[0].invuln = 0;
+      },
+      partyPhase: (ph) => { if (typeof startPartyPhase === "function") startPartyPhase(ph); },
+      getPartyFound: () => world.partyFound || 0,
+      getPartyBossLives: () => (world.partyBossLives == null ? 10 : world.partyBossLives),
+      openSuitcase: () => openSuitcase(),
+      pickWeapon: (id) => pickPartyWeapon(id),
+      getPartyWeapon: () => world.partyWeapon,
       fireZap: () => fireZap(false),
       zapBossNow: () => { world.redEyeLives = 0; finishSkyWin(); },
       getRedEyeLives: () => (world.redEyeLives == null ? 10 : world.redEyeLives),

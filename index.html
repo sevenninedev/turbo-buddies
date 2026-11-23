@@ -41,6 +41,7 @@
       <button type="button" id="modeParkour" class="mode-btn mode-parkour">Parkour House</button>
       <button type="button" id="modeWest" class="mode-btn mode-west">Wild West</button>
       <button type="button" id="modeSkyBattle" class="mode-btn mode-sky">Sky Battle</button>
+      <button type="button" id="modeParty" class="mode-btn mode-party">Secret Agent Party</button>
     </div>
     <p class="pick-prompt" id="pick-prompt" hidden>Pick your buddy!</p>
     <div id="cards" class="cards" hidden></div>
@@ -66,6 +67,36 @@
   <button type="button" id="btn-mute" class="mute-btn" aria-label="Mute">🔊</button>
   <button type="button" id="btn-lasso" class="lasso-btn" hidden aria-label="Throw lasso">LASSO</button>
   <button type="button" id="btn-zap" class="zap-btn" hidden aria-label="Fire zap">ZAP</button>
+  <div id="party-pad" hidden>
+    <button type="button" id="btn-left" class="pad-btn pad-left" aria-label="Left">◀</button>
+    <button type="button" id="btn-right" class="pad-btn pad-right" aria-label="Right">▶</button>
+    <button type="button" id="btn-jump" class="pad-btn pad-jump" aria-label="Jump">JUMP</button>
+    <button type="button" id="btn-suitcase" class="suitcase-btn" aria-label="Open suitcase">
+      <img src="assets/suitcase.png" alt="">
+      <span>CASE</span>
+    </button>
+  </div>
+  <div id="suitcase-tray" hidden>
+    <div class="case-panel">
+      <div class="case-lid"></div>
+      <p class="case-title">Pick a weapon!</p>
+      <div class="case-weapons">
+        <button type="button" class="wep-card" data-wep="blaster">
+          <img src="assets/sky_gun.png" alt="">
+          <span>Blaster</span>
+        </button>
+        <button type="button" class="wep-card" data-wep="bubble">
+          <img src="assets/wep_bubble.png" alt="">
+          <span>Bubble Zapper</span>
+        </button>
+        <button type="button" class="wep-card" data-wep="net">
+          <img src="assets/wep_net.png" alt="">
+          <span>Net Launcher</span>
+        </button>
+      </div>
+      <button type="button" id="btn-case-close" class="text-back">Close</button>
+    </div>
+  </div>
 
   <div id="map-ui" hidden>
     <h2 id="map-title">Adventure</h2>

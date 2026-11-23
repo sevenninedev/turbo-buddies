@@ -1188,6 +1188,7 @@
       p.vy = 0;
     }
     setZapBtn(true);
+    world.zapFlashes = [];
     world.clouds = (world.clouds || []).slice(0, 4);
     for (const c of world.clouds) c.s = (c.s || 1) * 0.65;
     world.obstacles = [
@@ -1213,6 +1214,43 @@
     else spawnSkyItem("crate", W + 50, y);
   }
 
+  const AI_SPARKLE_COLS = ["#ff5ad5", "#7af0ff", "#ffe566", "#b388ff", "#7ed957", "#ff9a2a"];
+
+  function emitRainbowSpark(x, y, vx, vy) {
+    if ((world.particles || []).length > 36) return;
+    const col = AI_SPARKLE_COLS[(Math.random() * AI_SPARKLE_COLS.length) | 0];
+    world.particles.push({
+      x: x + rand(-6, 6),
+      y: y + rand(-6, 6),
+      vx: vx != null ? vx : rand(-40, 40),
+      vy: vy != null ? vy : rand(-20, 90),
+      t: 0,
+      life: rand(0.28, 0.55),
+      kind: "sparkle",
+      r: rand(3.5, 7.2),
+      color: col,
+    });
+  }
+
+  function spawnZapFlash(x, y, helper) {
+    world.zapFlashes = world.zapFlashes || [];
+    if (world.zapFlashes.length > 8) world.zapFlashes.shift();
+    world.zapFlashes.push({ x: x, y: y, t: 0, life: 0.3, helper: !!helper });
+  }
+
+  function drawAura(x, y, r, rgb, strength) {
+    const s = strength == null ? 0.58 : strength;
+    const pulse = 0.84 + Math.sin(world.time * 5.4 + x * 0.02) * 0.16;
+    const g = ctx.createRadialGradient(x, y, r * 0.12, x, y, r);
+    g.addColorStop(0, "rgba(" + rgb + "," + (s * pulse) + ")");
+    g.addColorStop(0.42, "rgba(" + rgb + "," + (s * 0.38 * pulse) + ")");
+    g.addColorStop(1, "rgba(" + rgb + ",0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   function emitThruster(p) {
     const { drawH, drawW } = playerSize(p);
     world.particles.push({
@@ -1225,6 +1263,7 @@
       kind: "flame",
       r: rand(6, 12),
     });
+    if (Math.random() < 0.45) emitRainbowSpark(p.x, p.y + drawH * 0.36, rand(-50, 50), rand(60, 160));
   }
 
   function sfxZap() {
@@ -1279,6 +1318,9 @@
       re.hurt = 0.4;
       if (world.players[0]) addScore(world.players[0], 25, re.x, re.y);
       burst(re.x, re.y);
+      spawnZapFlash(re.x, re.y, false);
+      emitRainbowSpark(re.x, re.y, rand(-80, 80), rand(-80, 80));
+      emitRainbowSpark(re.x, re.y, rand(-80, 80), rand(-80, 80));
     }
     world.shake = 8;
     beep(300, 0.08, "square", 0.07);
@@ -1384,6 +1426,8 @@
           z.hit = true;
           if (p0) addScore(p0, 15, o.x, o.y);
           burst(o.x, o.y);
+          spawnZapFlash(o.x, o.y, true);
+          emitRainbowSpark(o.x, o.y, rand(-70, 70), rand(-60, 40));
           sfxCollect();
         }
       }
@@ -1449,6 +1493,15 @@
       pop.y -= 50 * dt;
     }
     world.popups = world.popups.filter((pop) => pop.t < 0.7);
+    for (const f of (world.zapFlashes || [])) f.t += dt;
+    world.zapFlashes = (world.zapFlashes || []).filter((f) => f.t < f.life);
+    if (p0 && Math.random() < 0.14) {
+      const ps = playerSize(p0);
+      emitRainbowSpark(p0.x, p0.y + ps.drawH * 0.15, rand(-40, 40), rand(20, 100));
+    }
+    if (world.helper && Math.random() < 0.1) {
+      emitRainbowSpark(world.helper.x, world.helper.y, rand(-50, 50), rand(-20, 80));
+    }
     world._hudT = (world._hudT || 0) + dt;
     if (world._hudT > 0.15) { world._hudT = 0; updateHud(); }
   }
@@ -1458,7 +1511,7 @@
     ctx.save();
     for (let i = 0; i < 7; i++) {
       const a = -0.85 + i * 0.3 + Math.sin(world.time * 0.45 + i) * 0.04;
-      const pulse = 0.1 + Math.sin(world.time * 2.1 + i) * 0.035;
+      const pulse = 0.12 + Math.sin(world.time * 2.1 + i) * 0.04;
       ctx.beginPath();
       ctx.moveTo(sx, sy);
       ctx.fillStyle = "rgba(255,255,210," + pulse + ")";
@@ -1467,12 +1520,46 @@
       ctx.closePath();
       ctx.fill();
     }
+    // soft lens flare from the sun
+    const pulse = 0.55 + Math.sin(world.time * 2.4) * 0.15;
+    let g = ctx.createRadialGradient(sx, sy, 2, sx, sy, 96);
+    g.addColorStop(0, "rgba(255,255,255," + (0.62 * pulse) + ")");
+    g.addColorStop(0.22, "rgba(255,240,160,0.32)");
+    g.addColorStop(1, "rgba(255,220,100,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 96, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.24 * pulse;
+    ctx.fillStyle = "#fffce8";
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, 140, 7, 0.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, 8, 74, 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    const cx = W * 0.42, cy = H * 0.4;
+    const flareCols = ["rgba(255,160,220,0.26)", "rgba(120,230,255,0.22)", "rgba(255,255,180,0.2)"];
+    for (let i = 0; i < 3; i++) {
+      const tt = 0.28 + i * 0.2;
+      const x = sx + (cx - sx) * tt;
+      const y = sy + (cy - sy) * tt;
+      const rr = 11 + i * 7;
+      const og = ctx.createRadialGradient(x, y, 0, x, y, rr);
+      og.addColorStop(0, flareCols[i]);
+      og.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = og;
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 10; i++) {
       const x = ((i * 83 + world.time * 28) % (W + 50)) - 20;
       const y = 70 + ((i * 113) % (H - 220));
       const tw = 0.45 + Math.sin(world.time * 5.2 + i * 1.3) * 0.55;
-      if (tw > 0.25) drawTwinkle(x, y, 3 + tw * 4.2, "rgba(255,255,230,0.92)");
+      if (tw > 0.22) drawTwinkle(x, y, 3 + tw * 4.4, AI_SPARKLE_COLS[i % AI_SPARKLE_COLS.length]);
     }
   }
 
@@ -1482,9 +1569,16 @@
     const sz = helperSize();
     if (!sz.img) return;
     const bob = Math.sin(world.time * 4.4) * 5;
+    const hx = hlp.x, hy = hlp.y + bob;
     ctx.save();
-    ctx.translate(hlp.x, hlp.y + bob);
+    drawAura(hx, hy, Math.max(sz.w, sz.h) * 0.95, sz.useBlaster ? "80,220,255" : "255,150,40", 0.6);
+    ctx.translate(hx, hy);
     ctx.rotate(Math.sin(world.time * 3.2) * 0.06);
+    for (let i = 0; i < 3; i++) {
+      const a = world.time * 3.4 + i * 2.1;
+      const rr = Math.max(sz.w, sz.h) * 0.42;
+      drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr, 3.4, AI_SPARKLE_COLS[(i + 2) % AI_SPARKLE_COLS.length]);
+    }
     ctx.drawImage(sz.img, -sz.w / 2, -sz.h / 2, sz.w, sz.h);
     ctx.restore();
   }
@@ -1492,26 +1586,70 @@
   function drawZaps() {
     for (const z of (world.zaps || [])) {
       const ang = Math.atan2(z.vy, z.vx);
+      const hot = z.fromHelper;
       ctx.save();
       ctx.translate(z.x, z.y);
       ctx.rotate(ang);
-      ctx.shadowColor = z.fromHelper ? "#3cf0ff" : "#ff4de0";
-      ctx.shadowBlur = 18;
-      const g = ctx.createLinearGradient(-26, 0, 28, 0);
-      g.addColorStop(0, "rgba(80,230,255,0)");
-      g.addColorStop(0.45, z.fromHelper ? "rgba(80,230,255,0.95)" : "rgba(255,90,220,0.95)");
-      g.addColorStop(1, "rgba(255,255,255,1)");
-      ctx.strokeStyle = g;
-      ctx.lineWidth = 8;
+      // soft bloom (no shadowBlur — cheaper on phones)
+      const bloom = ctx.createRadialGradient(8, 0, 0, 8, 0, 28);
+      bloom.addColorStop(0, hot ? "rgba(180,255,255,0.7)" : "rgba(255,180,255,0.7)");
+      bloom.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = bloom;
+      ctx.beginPath();
+      ctx.arc(10, 0, 28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = hot ? "rgba(80,230,255,0.35)" : "rgba(255,80,220,0.35)";
+      ctx.lineWidth = 16;
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(-22, 0);
-      ctx.lineTo(26, 0);
+      ctx.moveTo(-28, 0);
+      ctx.lineTo(30, 0);
+      ctx.stroke();
+      ctx.strokeStyle = hot ? "rgba(80,230,255,0.9)" : "rgba(255,90,220,0.9)";
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(-24, 0);
+      ctx.lineTo(28, 0);
+      ctx.stroke();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(-10, 0);
+      ctx.lineTo(28, 0);
       ctx.stroke();
       ctx.fillStyle = "#fff";
       ctx.beginPath();
-      ctx.arc(26, 0, 5.5, 0, Math.PI * 2);
+      ctx.arc(28, 0, 6.5, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawZapFlashes() {
+    for (const f of (world.zapFlashes || [])) {
+      const u = f.t / f.life;
+      const a = 1 - u;
+      const r = 14 + u * 52;
+      const col = f.helper ? "120,240,255" : "255,90,220";
+      ctx.save();
+      const g = ctx.createRadialGradient(f.x, f.y, 1, f.x, f.y, r);
+      g.addColorStop(0, "rgba(255,255,255," + (0.95 * a) + ")");
+      g.addColorStop(0.28, "rgba(" + col + "," + (0.72 * a) + ")");
+      g.addColorStop(1, "rgba(" + col + ",0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.9 * a;
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(f.x - r * 0.72, f.y);
+      ctx.lineTo(f.x + r * 0.72, f.y);
+      ctx.moveTo(f.x, f.y - r * 0.72);
+      ctx.lineTo(f.x, f.y + r * 0.72);
+      ctx.stroke();
       ctx.restore();
     }
   }
@@ -1523,17 +1661,16 @@
     const squash = 1 + Math.sin(world.time * 3.15) * 0.1;
     const rot = Math.sin(world.time * 2.5) * 0.14 + (re.hurt > 0 ? Math.sin(world.time * 22) * 0.1 : 0);
     ctx.save();
+    drawAura(re.x, re.y, Math.max(w, h) * 0.95, re.hurt > 0 ? "255,120,200" : "255,220,110", 0.62);
     ctx.translate(re.x, re.y);
     ctx.rotate(rot);
     ctx.scale(1 / Math.sqrt(squash), squash);
     if (re.flash > 0) ctx.globalAlpha = 0.55 + Math.sin(world.time * 40) * 0.35;
-    const halo = ctx.createRadialGradient(0, 0, 12, 0, 0, Math.max(w, h) * 0.72);
-    halo.addColorStop(0, "rgba(255,230,130,0.32)");
-    halo.addColorStop(1, "rgba(255,230,130,0)");
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(0, 0, Math.max(w, h) * 0.72, 0, Math.PI * 2);
-    ctx.fill();
+    for (let i = 0; i < 4; i++) {
+      const a = world.time * 2.6 + i * 1.6;
+      const rr = Math.max(w, h) * (0.46 + Math.sin(world.time * 4 + i) * 0.06);
+      drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr * 0.85, 3.8, AI_SPARKLE_COLS[i % AI_SPARKLE_COLS.length]);
+    }
     ctx.drawImage(redEyeImg, -w / 2, -h / 2, w, h);
     ctx.restore();
   }
@@ -3026,7 +3163,7 @@
       if (isSkyMode()) for (const tk of world.tickles) drawTickle(tk);
       if (isChaseMode() || isParkourMode()) drawChasers();
       if (isWestMode()) drawBanditAndLasso();
-      if (isSkyBattleMode()) { drawSkyHelper(); drawRedEyeBoss(); drawZaps(); }
+      if (isSkyBattleMode()) { drawSkyHelper(); drawRedEyeBoss(); drawZaps(); drawZapFlashes(); }
       for (const plr of world.players) drawPlayer(plr);
       if (isWestMode()) drawBanditLives();
       if (isSkyBattleMode()) drawRedEyeLives();
@@ -3465,6 +3602,15 @@
     ctx.translate(p.x, p.y + bob);
     ctx.rotate(rot);
     ctx.scale(sx, sy);
+    if (isSkyBattleMode() && ch && (ch.id === "flame" || ch.id === "blaster") && !p.ghost) {
+      const rgb = ch.id === "flame" ? "255,150,40" : "80,220,255";
+      drawAura(0, 0, Math.max(drawW, drawH) * 0.9, rgb, 0.62);
+      for (let i = 0; i < 4; i++) {
+        const a = world.time * 3.2 + i * 1.6 + p.slot;
+        const rr = Math.max(drawW, drawH) * (0.4 + Math.sin(world.time * 5 + i) * 0.08);
+        drawTwinkle(Math.cos(a) * rr, Math.sin(a) * rr, 3.4, AI_SPARKLE_COLS[i % AI_SPARKLE_COLS.length]);
+      }
+    }
 
     if (ch.zippy && !p.ghost) {
       ctx.save();
@@ -3732,20 +3878,32 @@
       const shine = 0.55 + Math.sin(world.time * 6 + s.x) * 0.45;
       ctx.save();
       ctx.translate(s.x, s.y);
-      const halo = ctx.createRadialGradient(0, 0, 2, 0, 0, s.r * 2.1);
-      halo.addColorStop(0, "rgba(255,255,180," + (0.55 + shine * 0.3) + ")");
+      const halo = ctx.createRadialGradient(0, 0, 2, 0, 0, s.r * 2.7);
+      halo.addColorStop(0, "rgba(255,255,210," + (0.75 + shine * 0.25) + ")");
+      halo.addColorStop(0.4, "rgba(180,140,255," + (0.28 + shine * 0.2) + ")");
       halo.addColorStop(1, "rgba(255,220,80,0)");
       ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.arc(0, 0, s.r * 2.1, 0, Math.PI * 2);
+      ctx.arc(0, 0, s.r * 2.7, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255," + (0.45 + shine * 0.4) + ")";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, s.r * 1.55, world.time * 2, world.time * 2 + 1.4);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,160,230," + (0.4 + shine * 0.35) + ")";
+      ctx.beginPath();
+      ctx.arc(0, 0, s.r * 1.7, world.time * -1.6, world.time * -1.6 + 1.1);
+      ctx.stroke();
       if (starburstImg) {
         const h = s.r * 2.6;
         const w = (starburstImg.width / starburstImg.height) * h;
         ctx.rotate(s.rot * 0.15);
         ctx.drawImage(starburstImg, -w / 2, -h / 2, w, h);
       }
-      drawTwinkle(s.r * 0.7, -s.r * 0.8, 5 + shine * 2, "rgba(255,255,230,0.95)");
+      drawTwinkle(s.r * 0.75, -s.r * 0.85, 6 + shine * 3, "#fffce0");
+      drawTwinkle(-s.r * 0.7, s.r * 0.2, 4 + shine * 2, "#7af0ff");
+      drawTwinkle(s.r * 0.15, s.r * 0.8, 3.5, "#ff5ad5");
       ctx.restore();
       return;
     }

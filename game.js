@@ -5129,7 +5129,11 @@
   });
 
   const prevent = (e) => { e.preventDefault(); };
-  document.addEventListener("touchmove", prevent, { passive: false });
+  document.addEventListener("touchmove", (e) => {
+    const t = e.target;
+    if (t && t.closest && t.closest("#start, #over, #victory, #level-end, .screen, #suitcase-tray, #unlock-pop")) return;
+    e.preventDefault();
+  }, { passive: false });
   document.addEventListener("gesturestart", prevent, { passive: false });
   document.addEventListener("contextmenu", prevent);
 

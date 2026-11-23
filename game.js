@@ -37,9 +37,17 @@
     { id: "sheriff", name: "Sheriff", src: "assets/sheriff.png" },
   ];
   let banditImg = null;
-  let campaign = "classic"; // classic | house | adventure | chase | parkour | west
+  const FLAME_CHARS = [
+    { id: "flame", name: "Flame Guy", src: "assets/flame_guy.png" },
+    { id: "blaster", name: "Blaster", src: "assets/blaster_guy.png" },
+  ];
+  let redEyeImg = null;
+  let smokePuffImg = null;
+  let starburstImg = null;
+  let runnerImg = null;
+  let campaign = "classic"; // classic | house | adventure | chase | parkour | west | skybattle
   let skipNextIntro = false;
-  let levelKind = "sky"; // sky | yard | house | boss | chase | parkour | west
+  let levelKind = "sky"; // sky | yard | house | boss | chase | parkour | west | skybattle
   let adventureLevel = 0; // 0-based
   let pendingLevel = 0;
   let muted = false;
@@ -57,18 +65,20 @@
     { name: "The Big Chase", kind: "chase", goalDist: 5200, spawnScale: 1.1 },
     { name: "Parkour House", kind: "parkour", goalDist: 5600, spawnScale: 1 },
     { name: "Wild West", kind: "west" },
+    { name: "Sky Battle", kind: "skybattle" },
   ];
   const START_CHARS = ["frog", "ape", "gorilla"];
-  const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike", 6: "money", 7: "skater", 8: "sheriff" };
+  const UNLOCK_BY_LEVEL = { 0: "yellow", 1: "elk", 2: "cg", 3: "cap", 4: "spike", 6: "money", 7: "skater", 8: "sheriff", 9: "flame", 10: "blaster" };
 
   let advSave = loadAdv();
   muted = !!advSave.muted;
 
-  function allBuddies() { return CHARS.concat(HOUSE_CHARS, CHASE_CHARS, WEST_CHARS); }
+  function allBuddies() { return CHARS.concat(HOUSE_CHARS, CHASE_CHARS, WEST_CHARS, FLAME_CHARS); }
   function roster() {
     if (campaign === "house") return HOUSE_CHARS;
     if (campaign === "chase" || campaign === "parkour") return CHASE_CHARS;
     if (campaign === "west") return WEST_CHARS;
+    if (campaign === "skybattle") return FLAME_CHARS;
     if (campaign === "adventure") return allBuddies();
     return CHARS;
   }
@@ -83,6 +93,9 @@
   function isWestMode() {
     return campaign === "west" || (campaign === "adventure" && levelKind === "west");
   }
+  function isSkyBattleMode() {
+    return campaign === "skybattle" || (campaign === "adventure" && levelKind === "skybattle");
+  }
   function isGroundMode() {
     return campaign === "house" || isChaseMode() || isParkourMode() || isWestMode() || (campaign === "adventure" && (levelKind === "house" || levelKind === "boss"));
   }
@@ -94,7 +107,7 @@
   }
 
   function defaultAdv() {
-    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
+    return { unlockedThrough: 1, stars: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], chars: START_CHARS.slice(), muted: false };
   }
   function loadAdv() {
     try {
@@ -103,10 +116,10 @@
       const d = JSON.parse(raw);
       const base = defaultAdv();
       if (!Array.isArray(d.stars)) d.stars = base.stars;
-      else if (d.stars.length < 10) d.stars = d.stars.concat([0, 0, 0, 0, 0, 0].slice(0, 10 - d.stars.length));
-      else if (d.stars.length > 10) d.stars = d.stars.slice(0, 10);
+      else if (d.stars.length < 11) d.stars = d.stars.concat([0, 0, 0, 0, 0, 0, 0].slice(0, 11 - d.stars.length));
+      else if (d.stars.length > 11) d.stars = d.stars.slice(0, 11);
       if (!Array.isArray(d.chars) || !d.chars.length) d.chars = base.chars;
-      d.unlockedThrough = Math.max(1, Math.min(10, d.unlockedThrough || 1));
+      d.unlockedThrough = Math.max(1, Math.min(11, d.unlockedThrough || 1));
       if ((d.stars[6] || 0) > 0) {
         d.unlockedThrough = Math.max(d.unlockedThrough, 8);
         if (d.chars.indexOf("money") === -1) d.chars.push("money");
@@ -118,6 +131,13 @@
       if ((d.stars[8] || 0) > 0) {
         d.unlockedThrough = Math.max(d.unlockedThrough, 10);
         if (d.chars.indexOf("sheriff") === -1) d.chars.push("sheriff");
+      }
+      if ((d.stars[9] || 0) > 0) {
+        d.unlockedThrough = Math.max(d.unlockedThrough, 11);
+        if (d.chars.indexOf("flame") === -1) d.chars.push("flame");
+      }
+      if ((d.stars[10] || 0) > 0) {
+        if (d.chars.indexOf("blaster") === -1) d.chars.push("blaster");
       }
       return d;
     } catch (e) { return defaultAdv(); }
@@ -397,6 +417,8 @@
         : '<span class="h1">P1: hold here</span><span class="h2">P2: hold here</span>';
     } else if (campaign === "adventure" && levelKind === "boss") {
       elHint.textContent = "JUMP ON THE EYE!";
+    } else if (isSkyBattleMode()) {
+      elHint.textContent = "HOLD TO FLY!";
     } else if (isWestMode()) {
       elHint.textContent = "TAP TO JUMP!";
     } else if (isParkourMode()) {
@@ -441,6 +463,8 @@
         const fy = houseFloorTop();
         world.platforms.push(makeHousePlatform("sofa", W * 0.58, fy - 44));
       }
+    } else if (isSkyBattleMode()) {
+      setupSkyBattle();
     }
     updateHud();
   }
@@ -793,6 +817,11 @@
       maybeCompleteLevel();
       return;
     }
+    if (isSkyBattleMode()) {
+      updateSkyBattle(dt);
+      maybeCompleteLevel();
+      return;
+    }
 
     syncBoosts();
 
@@ -1120,6 +1149,431 @@
     const b = document.getElementById("btn-lasso");
     if (b) b.hidden = !on;
   }
+
+  function setZapBtn(on) {
+    const b = document.getElementById("btn-zap");
+    if (b) b.hidden = !on;
+  }
+
+  function redEyeSize() {
+    const img = redEyeImg;
+    const h = 168;
+    const w = img ? (img.width / img.height) * h : 140;
+    return { w, h };
+  }
+
+  function helperSize() {
+    const p = world.players[0];
+    const useBlaster = !(p && p.char && p.char.id === "blaster");
+    const img = useBlaster ? (FLAME_CHARS[1] && FLAME_CHARS[1].image) : (FLAME_CHARS[0] && FLAME_CHARS[0].image);
+    const h = 96;
+    const w = img ? (img.width / img.height) * h : 70;
+    return { w, h, img, useBlaster };
+  }
+
+  function setupSkyBattle() {
+    world.goalDist = 0;
+    world.redEyeLives = 10;
+    world.zapCool = 0;
+    world.helperZapT = 0.4;
+    world.zaps = [];
+    world.skyWon = false;
+    world.powerT = 0;
+    world.spawnT = 0.35;
+    world.helper = { x: W * 0.14, y: H * 0.52, vy: 0 };
+    world.redEye = { x: W * 0.74, y: H * 0.40, vy: 0, flash: 0, hurt: 0 };
+    placePlayers();
+    for (const p of world.players) {
+      p.y = H * 0.46;
+      p.vy = 0;
+    }
+    setZapBtn(true);
+    world.clouds = (world.clouds || []).slice(0, 4);
+    for (const c of world.clouds) c.s = (c.s || 1) * 0.65;
+    world.obstacles = [
+      { kind: "smoke", x: W * 0.52, y: H * 0.26, r: 38, bob: 1.2, dead: false },
+      { kind: "runner", x: W * 0.58, y: H * 0.64, r: 32, bob: 2.1, dead: false },
+    ];
+    world.stars = [
+      { kind: "crate", x: W * 0.44, y: H * 0.48, r: 26, rot: 0.2, got: false, crate: true },
+    ];
+  }
+
+  function spawnSkyItem(kind, x, y) {
+    if (kind === "smoke") world.obstacles.push({ kind: "smoke", x: x, y: y, r: 38, bob: rand(0, 8), dead: false });
+    else if (kind === "runner") world.obstacles.push({ kind: "runner", x: x, y: y, r: 32, bob: rand(0, 8), dead: false });
+    else world.stars.push({ kind: "crate", x: x, y: y, r: 26, rot: rand(0, 2), got: false, crate: true });
+  }
+
+  function spawnSkyWave() {
+    const y = rand(130, H - 170);
+    const roll = Math.random();
+    if (roll < 0.4) spawnSkyItem("smoke", W + 50, y);
+    else if (roll < 0.8) spawnSkyItem("runner", W + 50, y);
+    else spawnSkyItem("crate", W + 50, y);
+  }
+
+  function emitThruster(p) {
+    const { drawH, drawW } = playerSize(p);
+    world.particles.push({
+      x: p.x + rand(-drawW * 0.22, drawW * 0.22),
+      y: p.y + drawH * 0.42,
+      vx: rand(-24, 24),
+      vy: rand(90, 200),
+      t: 0,
+      life: rand(0.22, 0.48),
+      kind: "flame",
+      r: rand(6, 12),
+    });
+  }
+
+  function sfxZap() {
+    beep(920, 0.055, "square", 0.055);
+    beep(1400, 0.07, "sine", 0.035);
+  }
+
+  function fireZap(fromHelper) {
+    if (!fromHelper && world.zapCool > 0) return;
+    const p = world.players[0];
+    if (!p || p.ghost) return;
+    let srcX = p.x, srcY = p.y;
+    if (fromHelper && world.helper) {
+      srcX = world.helper.x;
+      srcY = world.helper.y;
+    }
+    let tx = W + 40, ty = srcY;
+    const re = world.redEye;
+    if (re && !world.skyWon) { tx = re.x; ty = re.y; }
+    let best = null, bestD = 1e9;
+    for (const o of world.obstacles) {
+      if (o.dead || o.kind !== "runner") continue;
+      if (o.x < srcX - 8) continue;
+      const d = Math.hypot(o.x - srcX, o.y - srcY);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    if (best && bestD < Math.hypot(tx - srcX, ty - srcY) + 50) {
+      tx = best.x;
+      ty = best.y;
+    }
+    const ang = Math.atan2(ty - srcY, tx - srcX);
+    const spd = 580;
+    world.zaps.push({
+      x: srcX + 18,
+      y: srcY,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      t: 0,
+      life: 1.15,
+      fromHelper: !!fromHelper,
+    });
+    if (!fromHelper) world.zapCool = world.powerT > 0 ? 0.16 : 0.36;
+    sfxZap();
+  }
+
+  function hitRedEye() {
+    if (world.skyWon) return;
+    world.redEyeLives = Math.max(0, (world.redEyeLives == null ? 10 : world.redEyeLives) - 1);
+    const re = world.redEye;
+    if (re) {
+      re.flash = 0.28;
+      re.hurt = 0.4;
+      if (world.players[0]) addScore(world.players[0], 25, re.x, re.y);
+      burst(re.x, re.y);
+    }
+    world.shake = 8;
+    beep(300, 0.08, "square", 0.07);
+    if (world.redEyeLives <= 0) finishSkyWin();
+  }
+
+  function finishSkyWin() {
+    if (world.skyWon || world.levelDone) return;
+    world.skyWon = true;
+    const re = world.redEye;
+    if (re) {
+      burst(re.x, re.y);
+      coinBurst(re.x, re.y);
+    }
+    setZapBtn(false);
+    maybeCompleteLevel();
+  }
+
+  function updateSkyBattle(dt) {
+    syncBoosts();
+    world.speed = 128 + Math.min(90, world.dist / 36);
+    const sp = world.speed * dt;
+    world.dist += sp;
+
+    const GRAVITY = 700;
+    const BOOST = 1580;
+    const MAX_UP = 450;
+    const MAX_DOWN = 490;
+    for (const p of world.players) {
+      if (p.boosting) {
+        p.vy -= BOOST * dt;
+        if (Math.random() < 0.9) emitThruster(p);
+      } else {
+        p.vy += GRAVITY * dt;
+        if (Math.random() < 0.28) emitThruster(p);
+      }
+      p.vy = clamp(p.vy, -MAX_UP, MAX_DOWN);
+      p.y += p.vy * dt;
+      const { drawH } = playerSize(p);
+      const minY = 92 + drawH * 0.28;
+      const maxY = H - drawH * 0.36 - 72;
+      if (p.y < minY) { p.y = minY; p.vy *= 0.2; }
+      if (p.y > maxY) { p.y = maxY; p.vy *= 0.2; }
+      if (p.invuln > 0) p.invuln -= dt;
+    }
+    placePlayers();
+
+    const p0 = world.players[0];
+    if (p0 && world.helper) {
+      const hx = W * 0.14;
+      const hy = p0.y + 64;
+      world.helper.x += (hx - world.helper.x) * Math.min(1, dt * 4);
+      world.helper.y += (hy - world.helper.y) * Math.min(1, dt * 3.2);
+    }
+
+    world.helperZapT = (world.helperZapT || 0) - dt;
+    if (world.helperZapT <= 0 && !world.skyWon && livingPlayers().length) {
+      fireZap(true);
+      world.helperZapT = world.powerT > 0 ? 0.26 : 0.52;
+    }
+    if (world.zapCool > 0) world.zapCool -= dt;
+    if (world.powerT > 0) world.powerT -= dt;
+
+    const re = world.redEye;
+    if (re && !world.skyWon) {
+      re.y += Math.sin(world.time * 2.15) * 78 * dt;
+      re.y = clamp(re.y, 150, H - 190);
+      re.x = W * 0.74 + Math.sin(world.time * 1.25) * 16;
+      if (re.flash > 0) re.flash -= dt;
+      if (re.hurt > 0) re.hurt -= dt;
+    }
+
+    if (world.shake > 0) world.shake = Math.max(0, world.shake - 28 * dt);
+    if (world.hintT > 0) {
+      world.hintT -= dt;
+      if (world.hintT <= 0) elHint.hidden = true;
+    }
+
+    world.spawnT -= dt;
+    if (world.spawnT <= 0 && !world.skyWon) {
+      spawnSkyWave();
+      world.spawnT = rand(0.7, 1.15);
+    }
+
+    for (const o of world.obstacles) {
+      o.x -= sp * (o.kind === "smoke" ? 0.92 : 1.12);
+      if (o.bob != null) o.y += Math.sin(world.time * 2.4 + o.bob) * 26 * dt;
+    }
+    for (const s of world.stars) s.x -= sp * 0.88;
+    scrollDecor(dt, world.speed * 0.75);
+
+    for (const z of (world.zaps || [])) {
+      z.x += z.vx * dt;
+      z.y += z.vy * dt;
+      z.t += dt;
+    }
+    for (const z of (world.zaps || [])) {
+      if (z.t > z.life || z.hit) continue;
+      for (const o of world.obstacles) {
+        if (o.dead || o.kind !== "runner") continue;
+        if (Math.hypot(z.x - o.x, z.y - o.y) < o.r + 18) {
+          o.dead = true;
+          z.hit = true;
+          if (p0) addScore(p0, 15, o.x, o.y);
+          burst(o.x, o.y);
+          sfxCollect();
+        }
+      }
+      if (!z.hit && re && !world.skyWon) {
+        const sz = redEyeSize();
+        if (ellipseHit(z.x, z.y, 12, 12, re.x, re.y, sz.w * 0.4, sz.h * 0.4)) {
+          z.hit = true;
+          hitRedEye();
+        }
+      }
+    }
+    world.zaps = (world.zaps || []).filter((z) => z.t < z.life && !z.hit && z.x < W + 60 && z.x > -40 && z.y > -40 && z.y < H + 40);
+
+    for (const o of world.obstacles) {
+      if (o.dead || o.x < -80) continue;
+      for (const pl of world.players) {
+        if (pl.ghost) continue;
+        const { drawW, drawH } = playerSize(pl);
+        if (ellipseHit(pl.x, pl.y, drawW * 0.32, drawH * 0.34, o.x, o.y, o.r * 0.68, o.r * 0.68)) {
+          hitPlayer(pl);
+        }
+      }
+    }
+    world.obstacles = world.obstacles.filter((o) => o.x > -130 && !o.dead);
+
+    for (const s of world.stars) {
+      if (s.got) continue;
+      s.rot += dt * 2.2;
+      for (const pl of world.players) {
+        if (pl.ghost || s.got) continue;
+        const dx = s.x - pl.x, dy = s.y - pl.y;
+        if (dx * dx + dy * dy < (s.r + 32) * (s.r + 32)) {
+          s.got = true;
+          addScore(pl, 20, s.x, s.y);
+          world.powerT = 5.2;
+          sfxCollect();
+          coinBurst(s.x, s.y);
+        }
+      }
+    }
+    world.stars = world.stars.filter((s) => s.x > -60 && !s.got);
+
+    if (re && !world.skyWon) {
+      const sz = redEyeSize();
+      for (const pl of world.players) {
+        if (pl.ghost) continue;
+        const { drawW, drawH } = playerSize(pl);
+        if (ellipseHit(pl.x, pl.y, drawW * 0.28, drawH * 0.3, re.x, re.y, sz.w * 0.34, sz.h * 0.34)) {
+          hitPlayer(pl);
+        }
+      }
+    }
+
+    for (const part of world.particles) {
+      part.x += part.vx * dt;
+      part.y += part.vy * dt;
+      part.vy += 30 * dt;
+      part.t += dt;
+    }
+    world.particles = world.particles.filter((pt) => pt.t < pt.life);
+    for (const pop of world.popups) {
+      pop.t += dt;
+      pop.y -= 50 * dt;
+    }
+    world.popups = world.popups.filter((pop) => pop.t < 0.7);
+    world._hudT = (world._hudT || 0) + dt;
+    if (world._hudT > 0.15) { world._hudT = 0; updateHud(); }
+  }
+
+  function drawSkyBattleFx() {
+    const sx = W - 70, sy = 70;
+    ctx.save();
+    for (let i = 0; i < 7; i++) {
+      const a = -0.85 + i * 0.3 + Math.sin(world.time * 0.45 + i) * 0.04;
+      const pulse = 0.1 + Math.sin(world.time * 2.1 + i) * 0.035;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.fillStyle = "rgba(255,255,210," + pulse + ")";
+      ctx.lineTo(sx + Math.cos(a) * 820, sy + Math.sin(a) * 980);
+      ctx.lineTo(sx + Math.cos(a + 0.11) * 820, sy + Math.sin(a + 0.11) * 980);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+    for (let i = 0; i < 12; i++) {
+      const x = ((i * 83 + world.time * 28) % (W + 50)) - 20;
+      const y = 70 + ((i * 113) % (H - 220));
+      const tw = 0.45 + Math.sin(world.time * 5.2 + i * 1.3) * 0.55;
+      if (tw > 0.25) drawTwinkle(x, y, 3 + tw * 4.2, "rgba(255,255,230,0.92)");
+    }
+  }
+
+  function drawSkyHelper() {
+    const hlp = world.helper;
+    if (!hlp) return;
+    const sz = helperSize();
+    if (!sz.img) return;
+    const bob = Math.sin(world.time * 4.4) * 5;
+    ctx.save();
+    ctx.translate(hlp.x, hlp.y + bob);
+    ctx.rotate(Math.sin(world.time * 3.2) * 0.06);
+    ctx.drawImage(sz.img, -sz.w / 2, -sz.h / 2, sz.w, sz.h);
+    ctx.restore();
+  }
+
+  function drawZaps() {
+    for (const z of (world.zaps || [])) {
+      const ang = Math.atan2(z.vy, z.vx);
+      ctx.save();
+      ctx.translate(z.x, z.y);
+      ctx.rotate(ang);
+      ctx.shadowColor = z.fromHelper ? "#3cf0ff" : "#ff4de0";
+      ctx.shadowBlur = 18;
+      const g = ctx.createLinearGradient(-26, 0, 28, 0);
+      g.addColorStop(0, "rgba(80,230,255,0)");
+      g.addColorStop(0.45, z.fromHelper ? "rgba(80,230,255,0.95)" : "rgba(255,90,220,0.95)");
+      g.addColorStop(1, "rgba(255,255,255,1)");
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 8;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-22, 0);
+      ctx.lineTo(26, 0);
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(26, 0, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawRedEyeBoss() {
+    const re = world.redEye;
+    if (!re || !redEyeImg || world.skyWon) return;
+    const { w, h } = redEyeSize();
+    const squash = 1 + Math.sin(world.time * 3.15) * 0.1;
+    const rot = Math.sin(world.time * 2.5) * 0.14 + (re.hurt > 0 ? Math.sin(world.time * 22) * 0.1 : 0);
+    ctx.save();
+    ctx.translate(re.x, re.y);
+    ctx.rotate(rot);
+    ctx.scale(1 / Math.sqrt(squash), squash);
+    if (re.flash > 0) ctx.globalAlpha = 0.55 + Math.sin(world.time * 40) * 0.35;
+    const halo = ctx.createRadialGradient(0, 0, 12, 0, 0, Math.max(w, h) * 0.72);
+    halo.addColorStop(0, "rgba(255,230,130,0.32)");
+    halo.addColorStop(1, "rgba(255,230,130,0)");
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(w, h) * 0.72, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.drawImage(redEyeImg, -w / 2, -h / 2, w, h);
+    ctx.restore();
+  }
+
+  function drawRedEyeLives() {
+    if (!isSkyBattleMode()) return;
+    const n = world.redEyeLives == null ? 10 : world.redEyeLives;
+    const label = "Red-Eye: ❤️x" + n;
+    ctx.save();
+    ctx.font = "900 30px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const y = 92;
+    const x = W / 2;
+    const tw = ctx.measureText(label).width;
+    const bw = tw + 36, bh = 54;
+    ctx.fillStyle = "rgba(255, 250, 230, 0.94)";
+    ctx.strokeStyle = "#16324a";
+    ctx.lineWidth = 4;
+    const left = x - bw / 2, top = y - bh / 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(left, top, bw, bh, 16);
+    else ctx.rect(left, top, bw, bh);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#16324a";
+    ctx.fillText(label, x, y + 1);
+    ctx.restore();
+  }
+
+  function drawSkySprite(img, x, y, h, wob) {
+    if (!img) return;
+    const w = (img.width / img.height) * h;
+    const bob = Math.sin(world.time * 3.4 + (wob || 0)) * 4;
+    ctx.save();
+    ctx.translate(x, y + bob);
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    ctx.restore();
+  }
+
 
   function banditSize() {
     const img = banditImg;
@@ -2532,6 +2986,7 @@
       ctx.fillStyle = "rgba(255,255,220,0.35)";
       ctx.arc(W - 70, 70, 58, 0, Math.PI * 2);
       ctx.fill();
+      if (isSkyBattleMode()) drawSkyBattleFx();
 
       for (const c of world.clouds) drawPuff(c.x, c.y, 46 * c.s, `rgba(255,255,255,${0.55 + c.z * 0.25})`);
     }
@@ -2571,8 +3026,10 @@
       if (isSkyMode()) for (const tk of world.tickles) drawTickle(tk);
       if (isChaseMode() || isParkourMode()) drawChasers();
       if (isWestMode()) drawBanditAndLasso();
+      if (isSkyBattleMode()) { drawSkyHelper(); drawRedEyeBoss(); drawZaps(); }
       for (const plr of world.players) drawPlayer(plr);
       if (isWestMode()) drawBanditLives();
+      if (isSkyBattleMode()) drawRedEyeLives();
       for (const pop of world.popups) {
         ctx.save();
         ctx.globalAlpha = 1 - pop.t / 0.7;
@@ -3162,6 +3619,14 @@
       drawWestObstacle(o);
       return;
     }
+    if (o.kind === "smoke") {
+      drawSkySprite(smokePuffImg, o.x, o.y, 84, o.bob || 0);
+      return;
+    }
+    if (o.kind === "runner") {
+      drawSkySprite(runnerImg, o.x, o.y, 78, o.bob || 0);
+      return;
+    }
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
@@ -3263,6 +3728,27 @@
   }
 
   function drawStar(s) {
+    if (s.crate) {
+      const shine = 0.55 + Math.sin(world.time * 6 + s.x) * 0.45;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      const halo = ctx.createRadialGradient(0, 0, 2, 0, 0, s.r * 2.1);
+      halo.addColorStop(0, "rgba(255,255,180," + (0.55 + shine * 0.3) + ")");
+      halo.addColorStop(1, "rgba(255,220,80,0)");
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(0, 0, s.r * 2.1, 0, Math.PI * 2);
+      ctx.fill();
+      if (starburstImg) {
+        const h = s.r * 2.6;
+        const w = (starburstImg.width / starburstImg.height) * h;
+        ctx.rotate(s.rot * 0.15);
+        ctx.drawImage(starburstImg, -w / 2, -h / 2, w, h);
+      }
+      drawTwinkle(s.r * 0.7, -s.r * 0.8, 5 + shine * 2, "rgba(255,255,230,0.95)");
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.translate(s.x, s.y);
     ctx.rotate(s.rot);
@@ -3569,6 +4055,7 @@
     pickStep = "mode";
     chosen = { p1: null, p2: null };
     setLassoBtn(false);
+    setZapBtn(false);
     elModes.hidden = false;
     elCards.hidden = true;
     elPrompt.hidden = true;
@@ -3580,6 +4067,8 @@
     if (parkBtn) parkBtn.hidden = false;
     const westBtn = document.getElementById("modeWest");
     if (westBtn) westBtn.hidden = false;
+    const skyBtn = document.getElementById("modeSkyBattle");
+    if (skyBtn) skyBtn.hidden = false;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = false;
     const free = document.querySelector(".free-play-label");
@@ -3603,6 +4092,8 @@
     if (parkBtn) parkBtn.hidden = true;
     const westBtn = document.getElementById("modeWest");
     if (westBtn) westBtn.hidden = true;
+    const skyBtn = document.getElementById("modeSkyBattle");
+    if (skyBtn) skyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -3626,6 +4117,8 @@
     if (parkBtn) parkBtn.hidden = true;
     const westBtn = document.getElementById("modeWest");
     if (westBtn) westBtn.hidden = true;
+    const skyBtn = document.getElementById("modeSkyBattle");
+    if (skyBtn) skyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -3653,6 +4146,8 @@
     if (parkBtn) parkBtn.hidden = true;
     const westBtn = document.getElementById("modeWest");
     if (westBtn) westBtn.hidden = true;
+    const skyBtn = document.getElementById("modeSkyBattle");
+    if (skyBtn) skyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -3680,6 +4175,8 @@
     if (parkBtn) parkBtn.hidden = true;
     const westBtn = document.getElementById("modeWest");
     if (westBtn) westBtn.hidden = true;
+    const skyBtn = document.getElementById("modeSkyBattle");
+    if (skyBtn) skyBtn.hidden = true;
     const advBtn = document.getElementById("modeAdventure");
     if (advBtn) advBtn.hidden = true;
     const free = document.querySelector(".free-play-label");
@@ -3709,6 +4206,8 @@
       elTagline.textContent = "Parkour House — pick a buddy!";
     } else if (campaign === "west") {
       elTagline.textContent = "Wild West — pick a buddy!";
+    } else if (campaign === "skybattle") {
+      elTagline.textContent = "Sky Battle — pick a buddy!";
     } else {
       elTagline.textContent = mode === 2 ? "Two-player race!" : "Fly & dodge — pick your buddy!";
     }
@@ -3796,15 +4295,54 @@
     ensureAudio();
     showParkourPick();
   });
+  function showSkyBattlePick() {
+    campaign = "skybattle";
+    mode = 1;
+    pickStep = "p1";
+    chosen = { p1: null, p2: null };
+    elModes.hidden = true;
+    elCards.hidden = false;
+    elPrompt.hidden = false;
+    elBack.hidden = false;
+    document.getElementById("modeHouse").hidden = true;
+    const chaseBtn = document.getElementById("modeChase");
+    if (chaseBtn) chaseBtn.hidden = true;
+    const parkBtn = document.getElementById("modeParkour");
+    if (parkBtn) parkBtn.hidden = true;
+    const westBtn = document.getElementById("modeWest");
+    if (westBtn) westBtn.hidden = true;
+    const skyBtn = document.getElementById("modeSkyBattle");
+    if (skyBtn) skyBtn.hidden = true;
+    const advBtn = document.getElementById("modeAdventure");
+    if (advBtn) advBtn.hidden = true;
+    const free = document.querySelector(".free-play-label");
+    if (free) free.hidden = true;
+    elTagline.textContent = "Sky Battle — pick a buddy!";
+    elPrompt.textContent = "Pick your flyer!";
+    elPrompt.className = "pick-prompt";
+    renderCards();
+    refreshCards();
+  }
+
   document.getElementById("modeWest").addEventListener("click", () => {
     ensureAudio();
     showWestPick();
+  });
+  document.getElementById("modeSkyBattle").addEventListener("click", () => {
+    ensureAudio();
+    showSkyBattlePick();
   });
   document.getElementById("btn-lasso").addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     ensureAudio();
     throwLasso();
+  });
+  document.getElementById("btn-zap").addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    ensureAudio();
+    fireZap(false);
   });
   document.getElementById("modeAdventure").addEventListener("click", () => {
     ensureAudio();
@@ -3875,6 +4413,7 @@
 
   function hideAdventureOverlays() {
     setLassoBtn(false);
+    setZapBtn(false);
     const mapUi = document.getElementById("map-ui");
     const end = document.getElementById("level-end");
     const vic = document.getElementById("victory");
@@ -3923,6 +4462,12 @@
       else chaseFreeWin();
       return;
     }
+    if (isSkyBattleMode()) {
+      if (!world.skyWon) return;
+      if (campaign === "adventure") levelComplete();
+      else chaseFreeWin();
+      return;
+    }
     if (!world.goalDist || world.dist < world.goalDist) return;
     if (campaign === "adventure") {
       if (world.bossMode) return;
@@ -3940,9 +4485,10 @@
     elHint.hidden = true;
     elOver.hidden = false;
     setLassoBtn(false);
+    setZapBtn(false);
     const s = world.players[0] ? world.players[0].score : 0;
     const best = setBest(s);
-    elOverTitle.textContent = isWestMode() ? "Yeehaw! Gotcha!" : (isParkourMode() ? "You made it!" : "You got away!");
+    elOverTitle.textContent = isSkyBattleMode() ? "You zapped him!" : (isWestMode() ? "Yeehaw! Gotcha!" : (isParkourMode() ? "You made it!" : "You got away!"));
     elOver1p.hidden = false;
     elOver2p.hidden = true;
     document.getElementById("over-score").textContent = String(s);
@@ -3976,7 +4522,7 @@
       const prev = advSave.stars[adventureLevel] || 0;
       advSave.stars[adventureLevel] = Math.max(prev, stars);
       if (advSave.unlockedThrough < adventureLevel + 2) {
-        advSave.unlockedThrough = Math.min(10, adventureLevel + 2);
+        advSave.unlockedThrough = Math.min(11, adventureLevel + 2);
       }
       const rewardId = UNLOCK_BY_LEVEL[adventureLevel];
       if (rewardId && advSave.chars.indexOf(rewardId) === -1) {
@@ -4033,6 +4579,9 @@
     pickStep = "adv-pick";
     if (ADV_LEVELS[index] && (ADV_LEVELS[index].kind === "chase" || ADV_LEVELS[index].kind === "parkour") && isCharUnlocked("money")) {
       chosen.p1 = allBuddies().find((c) => c.id === "money") || chosen.p1;
+    }
+    if (ADV_LEVELS[index] && ADV_LEVELS[index].kind === "skybattle") {
+      chosen.p1 = allBuddies().find((c) => c.id === "flame" && isCharUnlocked(c.id)) || chosen.p1;
     }
     if (!chosen.p1 || !isCharUnlocked(chosen.p1.id)) {
       chosen.p1 = allBuddies().find((c) => isCharUnlocked(c.id)) || CHARS[0];
@@ -4102,16 +4651,17 @@
 
     // winding path of 10 nodes
     const nodes = [
-      { x: 0.20, y: 0.91 },
-      { x: 0.70, y: 0.83 },
-      { x: 0.26, y: 0.74 },
-      { x: 0.74, y: 0.65 },
-      { x: 0.24, y: 0.56 },
-      { x: 0.70, y: 0.47 },
-      { x: 0.28, y: 0.38 },
-      { x: 0.68, y: 0.29 },
-      { x: 0.30, y: 0.20 },
-      { x: 0.72, y: 0.11 },
+      { x: 0.20, y: 0.92 },
+      { x: 0.70, y: 0.84 },
+      { x: 0.26, y: 0.76 },
+      { x: 0.74, y: 0.68 },
+      { x: 0.24, y: 0.60 },
+      { x: 0.70, y: 0.52 },
+      { x: 0.28, y: 0.44 },
+      { x: 0.68, y: 0.36 },
+      { x: 0.30, y: 0.28 },
+      { x: 0.72, y: 0.20 },
+      { x: 0.28, y: 0.10 },
     ];
     const pts = nodes.map((n) => ({ x: n.x * W, y: n.y * H }));
     ctx.lineWidth = 18;
@@ -4137,7 +4687,7 @@
       const pulse = (unlocked && i === advSave.unlockedThrough - 1) ? 1 + Math.sin(world.time * 4) * 0.08 : 1;
       const r = 28 * pulse;
       ctx.beginPath();
-      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 9 ? "#ffc14d" : i === 8 ? "#ffe566" : i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
+      ctx.fillStyle = !unlocked ? "#c5c5c5" : (i === 10 ? "#7af0ff" : i === 9 ? "#ffc14d" : i === 8 ? "#ffe566" : i === 7 ? "#7ad7ff" : i === 6 ? "#ff7ad9" : i >= 4 ? "#ffb347" : "#7ed957");
       ctx.strokeStyle = "#16324a";
       ctx.lineWidth = 4;
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -4253,7 +4803,7 @@
   function showVictory() {
     if (state === "victory") return;
     world.levelDone = true;
-    if (advSave.unlockedThrough < 10) advSave.unlockedThrough = 10;
+    if (advSave.unlockedThrough < 11) advSave.unlockedThrough = 11;
     writeAdv();
     state = "victory";
     world.players.forEach((p) => { p.boosting = false; });
@@ -4345,7 +4895,7 @@
 
   function seedAdvShot() {
     advSave.unlockedThrough = 5;
-    advSave.stars = [3, 2, 3, 1, 0, 0, 0, 0, 0, 0];
+    advSave.stars = [3, 2, 3, 1, 0, 0, 0, 0, 0, 0, 0];
     advSave.chars = START_CHARS.concat(["yellow", "elk", "cg", "cap"]);
   }
 
@@ -4361,17 +4911,22 @@
       const houseChars = HOUSE_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
       const chaseChars = CHASE_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
       const westChars = WEST_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
+      const flameChars = FLAME_CHARS.map(async (c) => { c.image = await loadImage(c.src); });
       const chasePs = [
         loadImage("assets/tickle_hand2.png").then((img) => { tickle2Img = img; }),
         loadImage("assets/spinner_guy.png").then((img) => { spinnerImg = img; }),
         loadImage("assets/skater.png").then((img) => { skaterImg = img; }),
         loadImage("assets/bandit.png").then((img) => { banditImg = img; }),
+        loadImage("assets/red_eye_guy.png").then((img) => { redEyeImg = img; }),
+        loadImage("assets/smoke_puff.png").then((img) => { smokePuffImg = img; }),
+        loadImage("assets/starburst_box.png").then((img) => { starburstImg = img; }),
+        loadImage("assets/runner_footprints.png").then((img) => { runnerImg = img; }),
       ];
       await Promise.all(CHARS.map(async (c) => {
         c.image = await loadImage(c.src);
         if (c.flame) c.flameImg = await loadImage(c.flame);
         if (c.thumb) c.thumbImg = await loadImage(c.thumb);
-      }).concat([tickleP]).concat(housePs).concat(houseChars).concat(chaseChars).concat(westChars).concat(chasePs));
+      }).concat([tickleP]).concat(housePs).concat(houseChars).concat(chaseChars).concat(westChars).concat(flameChars).concat(chasePs));
     } catch (err) {
       elLoading.textContent = "Could not load pictures. Try refreshing.";
       console.error(err);
@@ -4475,6 +5030,18 @@
         startGame();
         if (world.players[0]) world.players[0].invuln = 0;
       },
+      startSkyBattle: (id) => {
+        campaign = "skybattle";
+        mode = 1;
+        chosen.p1 = FLAME_CHARS.find((x) => x.id === id) || FLAME_CHARS[0];
+        chosen.p2 = null;
+        skipNextIntro = true;
+        startGame();
+        if (world.players[0]) world.players[0].invuln = 0;
+      },
+      fireZap: () => fireZap(false),
+      zapBossNow: () => { world.redEyeLives = 0; finishSkyWin(); },
+      getRedEyeLives: () => (world.redEyeLives == null ? 10 : world.redEyeLives),
       throwLasso: () => throwLasso(),
       captureNow: () => { world.banditLives = 0; world.lassoHits = 10; startWestCapture(); },
       getLassoHits: () => world.lassoHits || 0,
